@@ -1,0 +1,3 @@
+# Database - connector.py
+psycopg2
+mysql-connector-python
