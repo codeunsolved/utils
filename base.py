@@ -3,7 +3,7 @@
 # PROGRAM : base
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : August 10 2016
-# VERSION : v0.0.1a2
+# VERSION : v0.0.1a3
 # UPDATE  : [v0.0.1a1] February 13 2017
 # 1. add `color_term()`, `execute_cmd()` and log related function/class;
 # 2. add :FileHandlerFormatter: to remove ANSI color format when :SetupLogger: log to `FileHandler`;
@@ -12,6 +12,9 @@
 # 1. add `print()` action to `color_term()`;
 # 2. optimize :StreamToLogger: to support seperate line;
 # 3. optimize :SetupLogger: by adding `log()`, etc;
+# UPDATE  : [v0.0.1a3] May 22 2018
+# 1. seperate `colour()` from `color_term()`;
+# 2. optimize :SetupLogger: by adding more specific log level functions;
 
 import os
 import re
@@ -21,8 +24,7 @@ import logging
 import subprocess
 
 
-def color_term(string, color='blue', bold=True,
-               on_stream=True, end='\n', exit_code=None):
+def colour(string, color='blue', bold=True):
     colors = {
         'grey': '\033[0;30m',
         'red': '\033[0;31m',  # ERR - ERROR
@@ -42,8 +44,15 @@ def color_term(string, color='blue', bold=True,
     color_start = colors[color].replace('[0', '[1') if bold else colors[color]
     color_string = color_start + str(string) + colors['END']
 
+    return color_string
+
+
+def color_term(string, color='blue', bold=True,
+               on_stream=True, end='\n', exit_code=None):
+    color_string = colour(string, color=color, bold=bold)
+
     if on_stream:
-        print(color_start + str(string) + colors['END'], end=end)
+        print(color_string, end=end)
 
     if exit_code is not None:
         exit(exit_code)
@@ -143,8 +152,8 @@ class SetupLogger(object):
 
     def log(self, msg, level='INFO', verbose=0, exit_code=None):
         level = str(level).upper()
-        if level not in ['CRT', 'CRITICAL', 
-                         'ERR', 'ERROR', 
+        if level not in ['CRT', 'CRITICAL',
+                         'ERR', 'ERROR',
                          'WRN', 'WARNING',
                          'IFO', 'INFO',
                          'DBG', 'DEBUG']:
@@ -153,11 +162,11 @@ class SetupLogger(object):
 
         if self.verbose_level >= verbose:
             if level in ['CRT', 'CRITICAL']:
-                self.logger.critical(color_term(msg, 'ERR', on_stream=False))
+                self.logger.critical(colour(msg, 'ERR'))
             elif level in ['ERR', 'ERROR']:
-                self.logger.error(color_term(msg, 'ERR', on_stream=False))
+                self.logger.error(colour(msg, 'ERR'))
             elif level in ['WRN', 'WARNING']:
-                self.logger.warning(color_term(msg, 'WRN'))
+                self.logger.warning(colour(msg, 'WRN'))
             elif level in ['IFO', 'INFO']:
                 self.logger.info(msg)
             elif level in ['DBG', 'DEBUG']:
@@ -166,11 +175,26 @@ class SetupLogger(object):
         if exit_code is not None:
             exit(exit_code)
 
+    def critical(self, msg, verbose=0, exit_code=None):
+        self.log(msg, level='CRT', verbose=verbose, exit_code=exit_code)
+
+    def error(self, msg, verbose=0, exit_code=None):
+        self.log(msg, level='ERR', verbose=verbose, exit_code=exit_code)
+
+    def warning(self, msg, verbose=0, exit_code=None):
+        self.log(msg, level='WRN', verbose=verbose, exit_code=exit_code)
+
+    def info(self, msg, verbose=0, exit_code=None):
+        self.log(msg, level='IFO', verbose=verbose, exit_code=exit_code)
+
+    def debug(self, msg, verbose=0, exit_code=None):
+        self.log(msg, level='DBG', verbose=verbose, exit_code=exit_code)
+
 
 class StreamToLogger(object):
     """Fake file-like stream object that redirects writes to a logger instance.
 
-    :Refer: 
+    :Refer:
     1.  [Redirect stdout and stderr to a logger in Python]
         (https://www.electricmonk.nl/log/2011/08/14/redirect-stdout-and-stderr-to-a-logger-in-python/)
     2.  [How to redirect stdout and stderr to logger in Python]

@@ -34,7 +34,7 @@ class AsyncSpider(object):
 
         self.q = queues.Queue()
         self.fetching, self.fetched = set(), set()
-        
+
         self.concurrency = concurrency
         self.max_trial = max_trial
 
