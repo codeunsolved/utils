@@ -31,7 +31,7 @@ def colour(string, color='blue', bold=True):
         'green': '\033[0;32m',
         'yellow': '\033[0;33m',  # WRN - WARNING
         'blue': '\033[0;34m',
-        'megenta': '\033[0;35m',
+        'magenta': '\033[0;35m',
         'cyan': '\033[0;36m',
         'white': '\033[0;37m',
 
