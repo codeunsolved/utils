@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.1a4
+# VERSION : v0.0.1a5
 # UPDATE  : [v0.0.1a1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -16,6 +16,8 @@
 # UPDATE  : [v0.0.1a4] September 5 2018
 # 1. :AnnCoordinates: add `exon_num`, `exon_total`, `cds_min` and `cds_max`;
 # 2. :AnnCoordinates: optimize entire query pipeline;
+# UPDATE  : [v0.0.1a5] September 18 2018
+# 1. :AnnCoordinates: add `exon_start`, `exon_end`;
 
 import os
 import re
@@ -185,6 +187,8 @@ class AnnCoordinates(object):
         # 'exon_total': {N},
         # 'cds_min':  {N},
         # 'cds_max':  {N},
+        # 'exon_start': exon start, it will be next exon start if rank is 'Intron{N}',
+        # 'exon_end': exon_end, it will be last exon end if rank is 'Intron{N}',
         self.rank_hits = []
         self.gene_info = {}  # Choosen one in self.gene_hits
         self.rank_info = {}  # Choosen one in self.rank_hits
@@ -349,8 +353,9 @@ class AnnCoordinates(object):
                     if transcript_id is not None:
                         self.rank_hits.append({'id': transcript_id, 'strand': strand, 'size': size,
                                                't_start': start, 't_end': end,
-                                               'rank': None, 'exon_num': None,
-                                               'exon_total': None, 'cds_min': None, 'cds_max': None})
+                                               'rank': None, 'exon_num': None, 'exon_total': None,
+                                               'cds_min': None, 'cds_max': None,
+                                               'exon_start': None, 'exon_end': None})
 
         def set_rank(r):
             def gen_rank(feature, exon_num, exon=True):
@@ -409,7 +414,7 @@ class AnnCoordinates(object):
                 x['rank'] = rank
                 x['exon_num'] = exon_num
 
-        def set_exon_total_and_cds_max(r):
+        def set_exon_and_cds(r):
             for x in self.rank_hits:
                 transcript_id = x['id']
 
@@ -418,6 +423,8 @@ class AnnCoordinates(object):
                 max_cds_num = 0
                 for entry in r:
                     feature = entry[3]
+                    start = entry[4]
+                    end = entry[5]
                     attr = entry[-1]
                     if not re.search("transcript_id={}".format(transcript_id), attr):
                         continue
@@ -426,6 +433,16 @@ class AnnCoordinates(object):
                         exon_num = int(self.get_attr_value(attr, 'exon_number'))
                         if exon_num > max_exon_num:
                             max_exon_num = exon_num
+
+                        if re.match('Intron', x['rank']):
+                            if exon_num == x['exon_num']:
+                                x['exon_end'] = end
+                            elif exon_num == x['exon_num']+1:
+                                x['exon_start'] = start
+                        else:
+                            if exon_num == x['exon_num']:
+                                x['exon_start'] = start
+                                x['exon_end'] = end
                     elif feature == 'CDS':
                         cds_num = int(self.get_attr_value(attr, 'exon_number'))
                         if cds_num < min_cds_num:
@@ -448,7 +465,7 @@ class AnnCoordinates(object):
             set_rank_hits(r)
             self.default_transcript = self.choose_transcript()
             set_rank(r)
-            set_exon_total_and_cds_max(r)
+            set_exon_and_cds(r)
             self.set_rank_info()
         else:
             color_term("[QUERY_GENE_RELATIVE] No found any relative entry for '{}'({})".format(
