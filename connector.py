@@ -3,16 +3,20 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.1
+# VERSION : v0.0.2
 # UPDATE  : [v0.0.1] March 21 2018
-# 1. Add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
-# 2. Optimize :MysqlConnector: as :PostgresqlConnector:;
+# 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
+# 2. optimize :MysqlConnector: as :PostgresqlConnector:;
+# UPDATE  : [v0.0.2] November 11 2018
+# 1. add `reconnect()` to :MysqlConnector: and :PostgresqlConnector:;
+# 2. add user-defined logger to :MysqlConnector: and :PostgresqlConnector:;
+# 3. optimize error code/number for :MysqlConnector: and :PostgresqlConnector:;
+
 
 import time
 
 import psycopg2
 import mysql.connector
-from mysql.connector import errorcode
 
 
 class DoesNotExist(Exception):
@@ -29,11 +33,10 @@ def stats_performance(func):
         START = time.time()
         results = func(*args, **kw)
         COST = time.time() - START
-        if self.verbose:
-            print("[{}] {} rows affected, cost {}s".format(
-                self.__class__.__name__,
-                self.cursor.rowcount,
-                round(COST, 7)))
+        self.log("[{}] {} rows affected, cost {}s".format(
+            self.__class__.__name__,
+            self.cursor.rowcount,
+            round(COST, 7)))
         return results
     return wrapper
 
@@ -52,20 +55,22 @@ class MysqlConnector(object):
         }
     """
 
-    def __init__(self, config, verbose=False):
+    def __init__(self, config, verbose=False, logger=print):
         self.config = config
         self.verbose = verbose
-
-        # Connect
-        self.connect(self.config)
-
+        self.logger = logger
         # Add exceptions
         self.DoesNotExist = DoesNotExist
         self.MultipleObjectsReturned = MultipleObjectsReturned
-
+        # Connect
+        self.connect(self.config)
         # Select DB if specified
         if 'database' in self.config:
             self.select_db(self.config['database'])
+
+    def log(self, msg):
+        if self.verbose:
+            self.logger(msg)
 
     def _commit(self):
         self.conn.commit()
@@ -74,15 +79,27 @@ class MysqlConnector(object):
         self.conn.rollback()
 
     @stats_performance
-    def _execute(self, sql, vals):
-        self.cursor.execute(sql, vals)
-        self._commit()
+    def _execute(self, sql, vals, retry=True):
+        try:
+            self.cursor.execute(sql, vals)
+        except Exception as e:
+            if e.errno in [2006,   # Error: MySQL server has gone away
+                           2013]:  # Error: Lost connection to MySQL server during query
+                if retry:
+                    self.log("[MysqlConnector] {}, retry!".format(e))
+                    self._execute(sql, vals, retry=False)
+                else:
+                    raise e
+            else:
+                raise e
+        else:
+            self._commit()
 
     def connect(self, config):
         try:
             self.conn = mysql.connector.connect(**config)
         except mysql.connector.Error as e:
-            if e.errno == errorcode.ER_ACCESS_DENIED_ERROR:
+            if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
                 raise Exception("[MysqlConnector] Connect failed! Username or password incorrect.")
             else:
                 raise e
@@ -90,31 +107,32 @@ class MysqlConnector(object):
             # cursor 'buffered=True' needed to use .fetch* and .rowcount
             self.cursor = self.conn.cursor(buffered=True)
 
+    def create_db(self, db_name):
+        msg = "[MysqlConnector] • Create database: {}".format(db_name)
+        try:
+            self.cursor.execute("CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
+        except mysql.connector.Error as e:
+            raise e
+        else:
+            msg += "OK!\n"
+            self.log(msg)
+
     def select_db(self, db_name, none_and_create=False):
         msg = "[MysqlConnector] • Select DB: {} ".format(db_name)
         try:
             self.conn.database = db_name
         except mysql.connector.Error as e:
-            if e.errno == errorcode.ER_BAD_DB_ERROR:
-                try:
-                    msg += "Failed! {}\n".format(e.msg)
-                    if none_and_create:
-                        msg += "[MysqlConnector] • Create database: {}".format(db_name)
-                        self.cursor.execute("CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
-                except mysql.connector.Error as e:
-                    msg += "Failed! {}\n".format(e.msg)
-                    exit(1)
-                else:
-                    msg += "OK!\n"
-                self.conn.database = db_name
+            if e.errno == 1049:    # Error: Unknown database '%s'
+                msg += "Failed! {}".format(e.msg)
+                self.log(msg)
+                if none_and_create:
+                    self.create_db(db_name)
+                    self.select_db(db_name)
             else:
-                msg += "Failed! {}\n".format(e.msg)
-                exit(1)
+                raise e
         else:
-            msg += "OK!\n"
-
-        if self.verbose:
-            print(msg.rstrip('\n'))
+            msg += "OK!"
+            self.log(msg)
 
     def select(self, tab, where_dict, cols_selected='*', filter_='='):
         cols, vals = zip(*where_dict.items())
@@ -164,9 +182,8 @@ class MysqlConnector(object):
         try:
             self._execute(sql, vals)
         except mysql.connector.errors.IntegrityError as e:
-            if e.errno == 1062:
-                # Pass 'Error Code: 1062. Duplicate entry'
-                print("[MysqlConnector] INSERT PASS! Duplicate entry.\n{}".format(e))
+            if e.errno == 1062:    # Error: Duplicate entry '%s' for key %d
+                self.log("[MysqlConnector] ERROR! pass INSERT!\n{}".format(e))
             else:
                 raise e
 
@@ -196,6 +213,13 @@ class MysqlConnector(object):
         self.cursor.close()
         self.conn.close()
 
+    def reconnect(self):
+        # Connect
+        self.connect(self.config)
+        # Select DB if specified
+        if 'database' in self.config:
+            self.select_db(self.config['database'])
+
 
 class PostgresqlConnector(object):
     """Connect PostgreSQL and execute SQL on it.
@@ -210,16 +234,19 @@ class PostgresqlConnector(object):
         }
     """
 
-    def __init__(self, config, verbose=False):
+    def __init__(self, config, verbose=False, logger=print):
         self.config = config
         self.verbose = verbose
-
-        # Connect
-        self.connect()
-
+        self.logger = logger
         # Add exceptions
         self.DoesNotExist = DoesNotExist
         self.MultipleObjectsReturned = MultipleObjectsReturned
+        # Connect
+        self.connect()
+
+    def log(self, msg):
+        if self.verbose:
+            self.logger(msg)
 
     def _commit(self):
         self.conn.commit()
@@ -289,3 +316,7 @@ class PostgresqlConnector(object):
     def close(self):
         self.cursor.close()
         self.conn.close()
+
+    def reconnect(self):
+        # Connect
+        self.connect()
