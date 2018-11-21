@@ -3,7 +3,7 @@
 # PROGRAM : base
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : August 10 2016
-# VERSION : v0.0.1a3
+# VERSION : v0.0.1a4
 # UPDATE  : [v0.0.1a1] February 13 2017
 # 1. add `color_term()`, `execute_cmd()` and log related function/class;
 # 2. add :FileHandlerFormatter: to remove ANSI color format when :SetupLogger: log to `FileHandler`;
@@ -15,6 +15,8 @@
 # UPDATE  : [v0.0.1a3] May 22 2018
 # 1. seperate `colour()` from `color_term()`;
 # 2. optimize :SetupLogger: by adding more specific log level functions;
+# UPDATE  : [v0.0.1a4] November 13 2018
+# 1. complete log levels in `colour` and make it consistent with :SetupLogger:;
 
 import os
 import re
@@ -26,8 +28,10 @@ import subprocess
 
 def colour(string, color='blue', bold=True):
     colors = {
+        'RESET': '\033[0m',      # IFO - INFO; DBG - DEBUG
+
         'grey': '\033[0;30m',
-        'red': '\033[0;31m',  # ERR - ERROR
+        'red': '\033[0;31m',     # ERR - ERROR; CRT - CRITICAL
         'green': '\033[0;32m',
         'yellow': '\033[0;33m',  # WRN - WARNING
         'blue': '\033[0;34m',
@@ -38,8 +42,11 @@ def colour(string, color='blue', bold=True):
         'END': '\033[0m',
     }
     # Log levels
-    colors['WRN'] = colors['yellow']
-    colors['ERR'] = colors['red']
+    colors['IFO'] = colors['INFO'] = colors['RESET']
+    colors['DBG'] = colors['DEBUG'] = colors['RESET']
+    colors['WRN'] = colors['WARNING'] = colors['yellow']
+    colors['ERR'] = colors['ERROR'] = colors['red']
+    colors['CRT'] = colors['CRITICAL'] = colors['red']
 
     color_start = colors[color].replace('[0', '[1') if bold else colors[color]
     color_string = color_start + str(string) + colors['END']
