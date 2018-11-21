@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.1a5
+# VERSION : v0.0.1a6
 # UPDATE  : [v0.0.1a1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -18,6 +18,8 @@
 # 2. :AnnCoordinates: optimize entire query pipeline;
 # UPDATE  : [v0.0.1a5] September 18 2018
 # 1. :AnnCoordinates: add `exon_start`, `exon_end`;
+# UPDATE  : [v0.0.1a6] November 13 2018
+# 1. add logger to :AnnCoordinates:;
 
 import os
 import re
@@ -65,7 +67,7 @@ class VcfParser(object):
             return th
 
         if not os.path.isfile(self.path_vcf):
-            color_term("[VCFPARSER] ERROR: Invalid VCF file path: {}".format(self.path_vcf), 'ERR')
+            color_term("[VCFPARSER] Error! Invalid VCF file path: {}".format(self.path_vcf), 'ERR')
         else:
             with open(self.path_vcf, 'r') as vcf:
                 for line in vcf:
@@ -147,7 +149,7 @@ class AnnCoordinates(object):
     def __init__(self, config=None, mysql_con=None,
                  gene_map={}, transcript_map={},
                  refer='hg19', ann_source='GENCODE',
-                 use_cache=True, verbose=False):
+                 use_cache=True, verbose=False, logger=color_term):
         # Configs
         self.config = config
         self.m_con = mysql_con
@@ -159,6 +161,7 @@ class AnnCoordinates(object):
         self.ann_source = ann_source
         self.use_cache = use_cache
         self.verbose = verbose
+        self.logger = logger
 
         self.ann_tab = None
 
@@ -205,6 +208,15 @@ class AnnCoordinates(object):
         self.check_refer()
 
         self.connect_db()
+        assert self.m_con is not None
+
+    def log(self, msg, level=None, verbose=None):
+        if level is None:
+            level = 'INFO'
+        if verbose is None:
+            verbose = self.verbose
+        if verbose:
+            self.logger(msg, level)
 
     def check_refer(self):
         assert self.refer in ['hg19', 'hg38']
@@ -217,13 +229,11 @@ class AnnCoordinates(object):
         self.chr = 'chr' + self.chr_index
 
         if not re.match('[12]?\d|[XY]$', self.chr_index):
-            color_term("[CHECK_CHR] Unrecognized Chr: {}".format(self.chr_), 'WRN')
+            self.log("[CHECK_CHR] Unrecognized Chr: {}".format(self.chr_), 'WRN', verbose=True)
 
     def connect_db(self):
         if self.config:
             self.m_con = MysqlConnector(self.config, self.verbose)
-
-        assert self.m_con is not None
 
     def init_ann(self):
         self.chr_ = None
@@ -246,8 +256,7 @@ class AnnCoordinates(object):
 
         key = "{}:{}".format(self.chr, self.pos)
         if self.use_cache and key in self.cache:
-            if self.verbose:
-                color_term("[QUERY] Use cache for {}".format(key), 'WRN')
+            self.log("[QUERY] Use cache for {}".format(key), 'WRN')
             self.gene_hits = self.cache[key]['gene_hits']
             self.rank_hits = self.cache[key]['rank_hits']
             self.gene_info = self.cache[key]['gene_info']
@@ -256,22 +265,22 @@ class AnnCoordinates(object):
             try:
                 self.query_gene()
             except Exception as e:
-                color_term("[QUERY_GENE] ERROR: [{}:{}] {}".format(self.chr, self.pos, e), 'ERR')
+                self.log("[QUERY_GENE] Error! [{}:{}] {}".format(
+                    self.chr, self.pos, e), 'ERR', verbose=True)
             else:
-                if self.verbose:
-                    print("• Query gene ... {}! {}hits genes: {}".format(
-                        colour("OK", 'green'),
-                        colour(len(self.gene_hits), 'green'),
-                        [x['name'] for x in self.gene_hits]))
+                self.log("• Query gene ... {}! {}hits genes: {}".format(
+                    colour("OK", 'green'),
+                    colour(len(self.gene_hits), 'green'),
+                    [x['name'] for x in self.gene_hits]))
 
             if self.gene_info['id']:
                 try:
                     self.query_gene_relative()
                 except Exception as e:
-                    color_term("[QUERY_GENE_RELATIVE] ERROR: [{}:{}] {}".format(self.chr, self.pos, e), 'ERR')
+                    self.log("[QUERY_GENE_RELATIVE] Error! [{}:{}] {}".format(
+                        self.chr, self.pos, e), 'ERR', verbose=True)
                 else:
-                    if self.verbose:
-                        print("• Query gene relative ... {}! {}hits transcripts: {}".format(
+                    self.log("• Query gene relative ... {}! {}hits transcripts: {}".format(
                             colour("OK", 'green'),
                             colour(len(self.rank_hits), 'green'),
                             [x['id'] for x in self.rank_hits]))
@@ -287,7 +296,7 @@ class AnnCoordinates(object):
         if s is not None:
             return s.group(1)
         else:
-            color_term("[GET_ATTR_VALUE] No '{}' in attributes: {}:{} - ({})".format(
+            self.log("[GET_ATTR_VALUE] No '{}' in attributes: {}:{} - ({})".format(
                 key, self.chr, self.pos, attr), 'WRN')
             return None
 
@@ -324,18 +333,17 @@ class AnnCoordinates(object):
         r = c.fetchall()
 
         if len(r) == 0:
-            if self.verbose:
-                color_term("[QUERY_GENE] No found for {}:{}, "
-                           "try to annotate as intergenic region".format(
-                            self.chr, self.pos), 'WRN')
+            self.log("[QUERY_GENE] No found for {}:{}, "
+                     "try to annotate as intergenic region".format(
+                        self.chr, self.pos), 'WRN')
             query_gene_intergenic()
         else:
             self.gene_hits = [get_gene_info(x[-1]) for x in r]
             self.gene_info = self.choose_gene()
             if len(r) > 1:
-                color_term("[QUERY_GENE] {} entries({}) found for {}:{}, choose: {}".format(
+                self.log("[QUERY_GENE] {} entries({}) found for {}:{}, choose: {}".format(
                     len(r), ', '.join([x['name'] for x in self.gene_hits]),
-                    self.chr, self.pos, self.gene_info['name']), 'WRN')
+                    self.chr, self.pos, self.gene_info['name']), 'WRN', verbose=True)
             if self.gene_info['name'] in self.gene_map:
                 self.gene_info['name'] = self.gene_map[self.gene_info['name']]
 
@@ -405,7 +413,7 @@ class AnnCoordinates(object):
                                 loc_flag = 1
                 if loc_flag != 0:
                     if transcript_id == self.default_transcript:
-                        color_term("[SET_RANK] [{}:{}] seems {} than the range of transcript: {} {}-{}".format(
+                        self.log("[SET_RANK] [{}:{}] seems {} than the range of transcript: {} {}-{}".format(
                             self.chr, self.pos,
                             'LESS' if loc_flag == -1 else 'LARGE',
                             transcript_id, x['t_start'], x['t_end']), 'WRN')
@@ -468,7 +476,7 @@ class AnnCoordinates(object):
             set_exon_and_cds(r)
             self.set_rank_info()
         else:
-            color_term("[QUERY_GENE_RELATIVE] No found any relative entry for '{}'({})".format(
+            self.log("[QUERY_GENE_RELATIVE] Found no relative entry for '{}'({})".format(
                 self.gene_info['name'], self.gene_info['id']), 'ERR')
 
     def choose_gene(self):
@@ -487,7 +495,7 @@ class AnnCoordinates(object):
             transcript_id_main = re.sub('\.\d+$', '', transcript_id)
             if transcript_id_main in self.transcript_map:
                 return x['id']
-        color_term("[CHOOSE_TRANSCRIPT] Use longest transcript as default: {} for {}".format(
+        self.log("[CHOOSE_TRANSCRIPT] Use longest transcript as default: {} for {}".format(
             rank_hits_sorted[0]['id'], self.gene_info['name']), 'WRN')
         return rank_hits_sorted[0]['id']
 
