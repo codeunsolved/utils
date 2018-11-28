@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.1a6
+# VERSION : v0.0.1a7
 # UPDATE  : [v0.0.1a1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -20,6 +20,9 @@
 # 1. :AnnCoordinates: add `exon_start`, `exon_end`;
 # UPDATE  : [v0.0.1a6] November 13 2018
 # 1. add logger to :AnnCoordinates:;
+# UPDATE  : [v0.0.1a7] November 27 2018
+# 1. [BugFix] fix tag content extraction regex in `parse_meta()`;
+# 2. [BugFix] fix bug in `extract_format()`;
 
 import os
 import re
@@ -96,7 +99,7 @@ class VcfParser(object):
         for line in self.header.rstrip('\n').split('\n'):
             if re.match("##{}".format(tag), line):
                 line_dict = {}
-                content = re.search('<([^<>]+)>', line).group(1)
+                content = re.search('=<(.+)>', line).group(1)
 
                 # Handle 'Description', 'Source' and 'Version' separately,
                 # because they could contain ',' in double-quotes.
@@ -135,7 +138,7 @@ class VcfParser(object):
                 format_keys = row['FORMAT'].split(':')
                 format_vals = row[sample].split(':')
                 sample_dict = dict(zip(format_keys, format_vals))
-                for k, v in sample_dict.entrys():
+                for k, v in sample_dict.items():
                     if k not in self.meta_format:
                         color_term("[VCFPARSER] Couldn't find FORMAT '{}' in header".format(k), 'WRN')
                 row[sample] = sample_dict
