@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.2
+# VERSION : v0.0.3
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -11,12 +11,11 @@
 # 1. add `reconnect()` to :MysqlConnector: and :PostgresqlConnector:;
 # 2. add user-defined logger to :MysqlConnector: and :PostgresqlConnector:;
 # 3. optimize error code/number for :MysqlConnector: and :PostgresqlConnector:;
-
+# UPDATE  : [v0.0.3] November 29 2018
+# 1. use conditional import;
+# 2. change line endings to Unix for minimum requirements;
 
 import time
-
-import psycopg2
-import mysql.connector
 
 
 class DoesNotExist(Exception):
@@ -42,6 +41,7 @@ def stats_performance(func):
 
 
 class MysqlConnector(object):
+    mysql = __import__('mysql.connector')
     """Connect MySQL and execute SQL on it.
 
     :param config: config for new class.
@@ -68,8 +68,8 @@ class MysqlConnector(object):
         if 'database' in self.config:
             self.select_db(self.config['database'])
 
-    def log(self, msg):
-        if self.verbose:
+    def log(self, msg, verbose=False):
+        if verbose or self.verbose:
             self.logger(msg)
 
     def _commit(self):
@@ -85,11 +85,13 @@ class MysqlConnector(object):
         except Exception as e:
             if e.errno in [2006,   # Error: MySQL server has gone away
                            2013]:  # Error: Lost connection to MySQL server during query
+                self.log("[MysqlConnector] {}{}".format(e, ', retry!' if retry else ''), verbose=True)
                 if retry:
-                    self.log("[MysqlConnector] {}, retry!".format(e))
                     self._execute(sql, vals, retry=False)
                 else:
                     raise e
+            elif e.errno == 1062:   # Error: Duplicate entry '%s' for key %d
+                self.log("[MysqlConnector] {}".format(e), verbose=True)
             else:
                 raise e
         else:
@@ -97,8 +99,8 @@ class MysqlConnector(object):
 
     def connect(self, config):
         try:
-            self.conn = mysql.connector.connect(**config)
-        except mysql.connector.Error as e:
+            self.conn = self.mysql.connector.connect(**config)
+        except self.mysql.connector.Error as e:
             if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
                 raise Exception("[MysqlConnector] Connect failed! Username or password incorrect.")
             else:
@@ -107,32 +109,28 @@ class MysqlConnector(object):
             # cursor 'buffered=True' needed to use .fetch* and .rowcount
             self.cursor = self.conn.cursor(buffered=True)
 
-    def create_db(self, db_name):
-        msg = "[MysqlConnector] • Create database: {}".format(db_name)
-        try:
-            self.cursor.execute("CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
-        except mysql.connector.Error as e:
-            raise e
-        else:
-            msg += "OK!\n"
-            self.log(msg)
-
-    def select_db(self, db_name, none_and_create=False):
+    def select_db(self, db_name):
         msg = "[MysqlConnector] • Select DB: {} ".format(db_name)
         try:
             self.conn.database = db_name
-        except mysql.connector.Error as e:
+        except self.mysql.connector.Error as e:
             if e.errno == 1049:    # Error: Unknown database '%s'
                 msg += "Failed! {}".format(e.msg)
-                self.log(msg)
-                if none_and_create:
-                    self.create_db(db_name)
-                    self.select_db(db_name)
             else:
                 raise e
         else:
             msg += "OK!"
-            self.log(msg)
+        self.log(msg)
+
+    def create_db(self, db_name):
+        msg = "[MysqlConnector] • Create database: {} ".format(db_name)
+        try:
+            self.cursor.execute("CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
+        except self.mysql.connector.Error as e:
+            raise e
+        else:
+            msg += "OK!\n"
+        self.log(msg, verbose=True)
 
     def select(self, tab, where_dict, cols_selected='*', filter_='='):
         cols, vals = zip(*where_dict.items())
@@ -178,14 +176,7 @@ class MysqlConnector(object):
         expr_values = ', '.join(['%s'] * len(vals))
 
         sql = "INSERT INTO `{}` ({}) VALUES ({})".format(tab, expr_insert, expr_values)
-
-        try:
-            self._execute(sql, vals)
-        except mysql.connector.errors.IntegrityError as e:
-            if e.errno == 1062:    # Error: Duplicate entry '%s' for key %d
-                self.log("[MysqlConnector] ERROR! pass INSERT!\n{}".format(e))
-            else:
-                raise e
+        self._execute(sql, vals)
 
     def update(self, tab, where_dict, update_dict):
         cols_w, vals_w = zip(*where_dict.items())
@@ -214,7 +205,6 @@ class MysqlConnector(object):
         self.conn.close()
 
     def reconnect(self):
-        # Connect
         self.connect(self.config)
         # Select DB if specified
         if 'database' in self.config:
@@ -222,6 +212,7 @@ class MysqlConnector(object):
 
 
 class PostgresqlConnector(object):
+    psycopg2 = __import__('psycopg2')
     """Connect PostgreSQL and execute SQL on it.
 
     :param config: config for new class.
@@ -244,8 +235,8 @@ class PostgresqlConnector(object):
         # Connect
         self.connect()
 
-    def log(self, msg):
-        if self.verbose:
+    def log(self, msg, verbose=False):
+        if verbose or self.verbose:
             self.logger(msg)
 
     def _commit(self):
@@ -254,24 +245,23 @@ class PostgresqlConnector(object):
     def _rollback(self):
         self.conn.rollback()
 
-    def _execute(self, sql, vals):
-        self.cursor.execute(sql, vals)
-        self._commit()
-
     @stats_performance
-    def _execute_(self, sql, vals):
+    def _execute(self, sql, vals):
         try:
-            self._execute(sql, vals)
-        except psycopg2.InternalError as e:
-            if e.pgerror == 'ERROR:  current transaction is aborted, \
-                             commands ignored until end of transaction block\n':
+            self.cursor.execute(sql, vals)
+        except self.psycopg2.InternalError as e:
+            # pgcode: '25P02' (in_failed_sql_transaction)
+            # pgerror: 'ERROR:  current transaction is aborted, commands ignored until end of transaction block'
+            if e.pgcode == '25P02':
                 self._rollback()
                 self._execute(sql, vals)
             else:
                 raise e
+        else:
+            self._commit()
 
     def connect(self):
-        self.conn = psycopg2.connect(**self.config)
+        self.conn = self.psycopg2.connect(**self.config)
         self.cursor = self.conn.cursor()
 
     def select(self, tab, where_dict, cols_selected='*', filter_='='):
@@ -280,7 +270,7 @@ class PostgresqlConnector(object):
         expr_where = ' AND '.join(["{} {} %s".format(x, filter_) for x in cols])
 
         sql = "SELECT {} FROM \"{}\" WHERE {}".format(expr_select, tab, expr_where)
-        self._execute_(sql, vals)
+        self._execute(sql, vals)
         return self.cursor
 
     def insert(self, tab, insert_dict):
@@ -289,7 +279,7 @@ class PostgresqlConnector(object):
         expr_values = ', '.join(['%s'] * len(vals))
 
         sql = "INSERT INTO \"{}\" ({}) VALUES ({})".format(tab, expr_insert, expr_values)
-        self._execute_(sql, vals)
+        self._execute(sql, vals)
 
     def update(self, tab, where_dict, update_dict):
         cols_w, vals_w = zip(*where_dict.items())
@@ -298,10 +288,10 @@ class PostgresqlConnector(object):
         expr_where = ' AND '.join(["{} = %s".format(x) for x in cols_w])
 
         sql = "UPDATE \"{}\" SET {} WHERE {}".format(tab, expr_set, expr_where)
-        self._execute_(sql, vals_u + vals_w)
+        self._execute(sql, vals_u + vals_w)
 
     def query(self, sql, vals=None):
-        self._execute_(sql, vals)
+        self._execute(sql, vals)
         return self.cursor
 
     def get(self, tab, query_dict, cols_selected='*', filter_='='):
@@ -318,5 +308,4 @@ class PostgresqlConnector(object):
         self.conn.close()
 
     def reconnect(self):
-        # Connect
         self.connect()
