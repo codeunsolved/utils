@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.3
+# VERSION : v0.0.4
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -14,6 +14,9 @@
 # UPDATE  : [v0.0.3] November 29 2018
 # 1. use conditional import;
 # 2. change line endings to Unix for minimum requirements;
+# UPDATE  : [v0.0.4] December 4 2018
+# 1. add :MongoConnector:;
+
 
 import time
 
@@ -309,3 +312,80 @@ class PostgresqlConnector(object):
 
     def reconnect(self):
         self.connect()
+
+
+class MongoConnector(object):
+    pymongo = __import__('pymongo')
+    """Connect MongoDB and execute operations on it.
+
+    :param config: config for new class.
+        config = {
+           'username': '',
+           'password': '',
+           'host': '127.0.0.1',
+           'port': '',  # default: 27017
+           'database': 'database',
+        }
+    """
+
+    def __init__(self, config, verbose=False, logger=print):
+        self.config = config
+        self.verbose = verbose
+        self.logger = logger
+        # Add exceptions
+        self.DoesNotExist = DoesNotExist
+        self.MultipleObjectsReturned = MultipleObjectsReturned
+        # Connect
+        self.uri = None
+        self.connect(self.config)
+
+    def log(self, msg, verbose=False):
+        if verbose or self.verbose:
+            self.logger(msg)
+
+    def gen_uri(self, config):
+        if 'username' in config and 'password' in config and 'authsource' in config:
+            if config['username'] and config['password'] and config['authsource']:
+                cred = "{u}:{p}@".format(u=config['username'], p=config['password'])
+                auth = "?authSource={a}".format(a=config['authsource'])
+            else:
+                cred = ''
+                auth = ''
+        else:
+            cred = ''
+            auth = ''
+
+        if 'host' not in config or not config['host']:
+            host = 'localhost'
+        else:
+            host = config['host']
+
+        if 'port' not in config or not config['port']:
+            port = 27017
+        else:
+            port = config['port']
+
+        if 'database' not in config or not config['database']:
+            database = '/'
+        else:
+            database = "/{}".format(config['database'])
+
+        uri = "mongodb://{cred}{host}:{port}{database}{auth}".format(
+            cred=cred, host=host, port=port, database=database, auth=auth)
+        return uri
+
+    def connect(self, config, serverSelectionTimeoutMS=1000):
+        try:
+            self.uri = self.gen_uri(self.config)
+            self.conn = self.pymongo.MongoClient(
+                self.uri,
+                serverSelectionTimeoutMS=serverSelectionTimeoutMS)
+            # A cheap way to find out that the connection is established
+            self.conn.admin.command('ismaster')
+        except Exception as e:
+            raise e
+        else:
+            pass
+
+    def select_db(self, db_name):
+        return self.conn[db_name]
