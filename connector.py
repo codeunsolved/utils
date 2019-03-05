@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.4
+# VERSION : v0.0.5
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -16,7 +16,8 @@
 # 2. change line endings to Unix for minimum requirements;
 # UPDATE  : [v0.0.4] December 4 2018
 # 1. add :MongoConnector:;
-
+# UPDATE  : [v0.0.5] February 28 2019
+# 1. [BugFix] make up missed 'self.reconnect()' when MySQL occurs 2006, 2013 error;
 
 import time
 
@@ -90,6 +91,7 @@ class MysqlConnector(object):
                            2013]:  # Error: Lost connection to MySQL server during query
                 self.log("[MysqlConnector] {}{}".format(e, ', retry!' if retry else ''), verbose=True)
                 if retry:
+                    self.reconnect()
                     self._execute(sql, vals, retry=False)
                 else:
                     raise e
