@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.5
+# VERSION : v0.0.6
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -18,6 +18,8 @@
 # 1. add :MongoConnector:;
 # UPDATE  : [v0.0.5] February 28 2019
 # 1. [BugFix] make up missed 'self.reconnect()' when MySQL occurs 2006, 2013 error;
+# UPDATE  : [v0.0.6] March 5 2019
+# 1. optimize and add :MongoConnector: functions;
 
 import time
 
@@ -389,5 +391,11 @@ class MongoConnector(object):
         else:
             pass
 
-    def select_db(self, db_name):
-        return self.conn[db_name]
+    def select_db(self, db_name=None):
+        if db_name is None:
+            return self.conn[self.config['database']]
+        else:
+            return self.conn[db_name]
+
+    def close(self):
+        self.conn.close()
