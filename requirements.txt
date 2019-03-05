@@ -1,5 +1,5 @@
 # Database - connector.py
-psycopg2
+psycopg2-binary
 mysql-connector-python
 
 # Spider - spider.py
