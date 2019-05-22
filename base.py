@@ -3,20 +3,22 @@
 # PROGRAM : base
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : August 10 2016
-# VERSION : v0.0.1a4
-# UPDATE  : [v0.0.1a1] February 13 2017
+# VERSION : v0.0.5
+# UPDATE  : [v0.0.1] February 13 2017
 # 1. add `color_term()`, `execute_cmd()` and log related function/class;
 # 2. add :FileHandlerFormatter: to remove ANSI color format when :SetupLogger: log to `FileHandler`;
 # [ToDo] Not real time output with `subprocess.Popen()` in `execute_cmd()`;
-# UPDATE  : [v0.0.1a2] May 18 2018
+# UPDATE  : [v0.0.2] May 18 2018
 # 1. add `print()` action to `color_term()`;
 # 2. optimize :StreamToLogger: to support seperate line;
 # 3. optimize :SetupLogger: by adding `log()`, etc;
-# UPDATE  : [v0.0.1a3] May 22 2018
+# UPDATE  : [v0.0.3] May 22 2018
 # 1. seperate `colour()` from `color_term()`;
 # 2. optimize :SetupLogger: by adding more specific log level functions;
-# UPDATE  : [v0.0.1a4] November 13 2018
+# UPDATE  : [v0.0.4] November 13 2018
 # 1. complete log levels in `colour` and make it consistent with :SetupLogger:;
+# UPDATE  : [v0.0.5] May 22 2019
+# 1. optimize log directory generation in :SetupLogger: to support multiple thread workflow;
 
 import os
 import re
@@ -82,7 +84,7 @@ class FileHandlerFormatter(logging.Formatter):
 
     def format(self, record):
         msg = super(FileHandlerFormatter, self).format(record)
-        return re.sub('\\033\[[\d;]+m', '', msg)
+        return re.sub(r'\033\[[\d;]+m', '', msg)
 
 
 class SetupLogger(object):
@@ -127,6 +129,8 @@ class SetupLogger(object):
             color_term('CREATE ', 'grey', end='')
             try:
                 os.makedirs(dir_name)
+            except FileExistsError:
+                pass
             except Exception as e:
                 raise Exception(e)
             else:
