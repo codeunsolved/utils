@@ -21,15 +21,18 @@
 # UPDATE  : [v0.0.6] November 13 2018
 # 1. add logger to :AnnCoordinates:;
 # UPDATE  : [v0.0.7] November 27 2018
-# 1. [BugFix] fix tag content extraction regex in `parse_meta()`;
-# 2. [BugFix] fix bug in `extract_format()`;
+# 1. [BugFix] fix tag content extraction regex in :VcfParser: `parse_meta()`;
+# 2. [BugFix] fix bug in :VcfParser: `extract_format()`;
 # UPDATE  : [v0.0.8] April 8 2019
 # 1. enhance :VcfParser:;
 # UPDATE  : [v0.0.9] May 10 2019
 # 1. enhance :AnnCoordinates: by using cache for entire gene region;
+# UPDATE  : [v0.0.10] June 17 2019
+# 1. [BugFix] fix cross modification problem of 'rank_info' dict in :AnnCoordinates:;
 
 import os
 import re
+from copy import deepcopy as copy
 from collections import defaultdict
 
 import numpy as np
@@ -360,10 +363,8 @@ class AnnCoordinates(object):
                         [x['id'] for x in self.trans_hits]))
 
         def _cache_coord(coord):
-            self.cache_coord[coord]['gene_hits'] = self.gene_hits
-            self.cache_coord[coord]['gene_info'] = self.gene_info
-            self.cache_coord[coord]['trans_hits'] = self.trans_hits
-            self.cache_coord[coord]['rank_info'] = self.rank_info
+            self.cache_coord[coord]['gene_info'] = copy(self.gene_info)
+            self.cache_coord[coord]['rank_info'] = copy(self.rank_info)
 
         def _cache_region():
             region = match_cache_region(self.chr, self.pos)
@@ -372,8 +373,8 @@ class AnnCoordinates(object):
                 region['chr'] = self.chr
                 region['start'] = self.gene_info['start']
                 region['end'] = self.gene_info['end']
-                region['gene_info'] = self.gene_info
-                region['trans_hits'] = self.trans_hits
+                region['gene_info'] = copy(self.gene_info)
+                region['trans_hits'] = copy(self.trans_hits)
                 self.cache_region.append(region)
 
         self.init_ann()
@@ -385,19 +386,17 @@ class AnnCoordinates(object):
         coord = "{}:{}".format(self.chr, self.pos)
         if self.use_cache and coord in self.cache_coord:
             self.log("[QUERY] Use coord cache for {}".format(coord), 'WRN')
-            self.gene_hits = self.cache_coord[coord]['gene_hits']
-            self.trans_hits = self.cache_coord[coord]['trans_hits']
-            self.gene_info = self.cache_coord[coord]['gene_info']
-            self.rank_info = self.cache_coord[coord]['rank_info']
+            self.gene_info = copy(self.cache_coord[coord]['gene_info'])
+            self.rank_info = copy(self.cache_coord[coord]['rank_info'])
         else:
             region = match_cache_region(self.chr, self.pos)
 
             if self.use_cache and region is not None:
                 self.log("[QUERY] Use region cache for {} hit by {}".format(
                     coord, region['gene_info']['name']), 'WRN')
-                self.gene_info = region['gene_info']
+                self.gene_info = copy(region['gene_info'])
                 if self.gene_info['id']:
-                    self.trans_hits = region['trans_hits']
+                    self.trans_hits = copy(region['trans_hits'])
                     self.set_rank_info()
             else:
                 _query_gene()
@@ -668,8 +667,8 @@ class AnnCoordinates(object):
         for x in self.gene_hits:
             gene_type = x['type']
             if gene_type == 'protein_coding':
-                return x
-        return self.gene_hits[0]
+                return copy(x)
+        return copy(self.gene_hits[0])
 
     def _choose_default_transcript(self):
         # Prefer (longest) transcript in `transcript_map`, or longest transcript
@@ -688,8 +687,8 @@ class AnnCoordinates(object):
         # Prefer default transcript, or first one
         for x in self.trans_hits:
             if x['id'] == self.default_transcript:
-                return x['rank_info']
-        return self.trans_hits[0]['rank_info']
+                return copy(x['rank_info'])
+        return copy(self.trans_hits[0]['rank_info'])
 
     def get_gene_name(self):
         if 'name' in self.gene_info:
