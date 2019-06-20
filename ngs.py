@@ -30,9 +30,12 @@
 # UPDATE  : [v0.0.10] June 17 2019
 # 1. [BugFix] fix cross modification problem of 'rank_info' dict in :AnnCoordinates:;
 # UPDATE  : [v0.0.11] June 19 2019
-# 1. optimize gene, transcript, rank selection policy and entire work flow;
-# 2. [BugFix] fix UTR rank annotation which does not handle intron;
-# 3. optimize logger;
+# 1. :AnnCoordinates: optimize gene, transcript, rank selection policy and entire work flow;
+# 2. :AnnCoordinates: [BugFix] fix UTR rank annotation which does not handle intron;
+# 3. :AnnCoordinates: optimize logger;
+# UPDATE  : [v0.0.12] June 20 2019
+# 1. :AnnCoordinates: add option to filter non-protein-coding gene;
+
 
 import os
 import re
@@ -223,7 +226,7 @@ class AnnCoordinates(object):
 
     def __init__(self, config=None, mysql_con=None,
                  gene_map={}, transcript_map={},
-                 refer='hg19', ann_source='GENCODE',
+                 refer='hg19', ann_source='GENCODE', ann_gene_type='protein_coding',
                  use_cache=True,
                  logger_name=None, logger_level=logging.INFO):
         # Configs
@@ -235,9 +238,12 @@ class AnnCoordinates(object):
         self.transcript_map = transcript_map
         self.refer = refer
         self.ann_source = ann_source
+        self.ann_gene_type = ann_gene_type
         self.use_cache = use_cache
         self.logger_name = logger_name or self.__class__.__name__
         self.logger_level = logger_level
+
+        assert self.ann_gene_type in ['protein_coding', 'all']
 
         self.ann_tab = None
 
@@ -286,6 +292,13 @@ class AnnCoordinates(object):
         self.default_transcript = None
         self.coord_cache = defaultdict(dict)
         self.region_cache = []
+
+        self.protein_coding_types = [
+            'protein_coding',
+            r'IG_\w_gene',
+            r'TR_\w_gene',
+            'polymorphic_pseudogene',
+        ]
 
         self.ann_tabs = {
             'hg19': {
@@ -453,11 +466,22 @@ class AnnCoordinates(object):
             cache_region()
 
     def _query_gene(self):
-        def gen_r():
+        def gen_gene_type_regex():
+            if self.ann_gene_type == 'protein_coding':
+                pc_regex = '|'.join(self.protein_coding_types)
+                pc_regex = re.sub(r'\\w', '[[:alpha:]]', pc_regex)
+                gene_type_regex = " AND Attribute REGEXP 'gene_type=({});'".format(
+                    pc_regex)
+            else:
+                gene_type_regex = ''
+            return gene_type_regex
+
+        def gen_r(gene_type_regex):
             sql = "SELECT * FROM `{tab}` " \
                   "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                  "Start <= %s AND End >= %s".format(
-                    tab=self.ann_tab)
+                  "Start <= %s AND End >= %s{gene_type_regex}".format(
+                    tab=self.ann_tab,
+                    gene_type_regex=gene_type_regex)
 
             c = self.m_con.query(sql, [self.chr, self.pos, self.pos])
             r = c.fetchall()
@@ -467,10 +491,15 @@ class AnnCoordinates(object):
             gene_hits = []
             for entry in entries:
                 attr = entry[-1]
+
+                gene_id = self._get_attr_value(attr, 'ID')
+                gene_name = self._get_attr_value(attr, 'gene_name')
+                gene_type = self._get_attr_value(attr, 'gene_type')
+
                 gene_hits.append({
-                    'id': self._get_attr_value(attr, 'ID'),
-                    'name': self._get_attr_value(attr, 'gene_name'),
-                    'type': self._get_attr_value(attr, 'gene_type'),
+                    'id': gene_id,
+                    'name': gene_name,
+                    'type': gene_type,
                     'source': entry[2],
                     'chr': entry[1],
                     'start': int(entry[4]),
@@ -480,16 +509,18 @@ class AnnCoordinates(object):
                 })
             return gene_hits
 
-        def query_gene_intergenic():
+        def query_gene_intergenic(gene_type_regex):
             sql_l = "SELECT * FROM `{tab}` " \
                     "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                    "End < %s ORDER BY End DESC LIMIT 1".format(
-                        tab=self.ann_tab)
+                    "End < %s{gene_type_regex} ORDER BY End DESC LIMIT 1".format(
+                        tab=self.ann_tab,
+                        gene_type_regex=gene_type_regex)
             r_l = self.m_con.query(sql_l, [self.chr, self.pos]).fetchone()
             sql_r = "SELECT * FROM `{tab}` " \
                     "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                    "Start > %s ORDER BY Start LIMIT 1".format(
-                        tab=self.ann_tab)
+                    "Start > %s{gene_type_regex} ORDER BY Start LIMIT 1".format(
+                        tab=self.ann_tab,
+                        gene_type_regex=gene_type_regex)
             r_r = self.m_con.query(sql_r, [self.chr, self.pos]).fetchone()
 
             gene_name_l = '-' if r_l is None else self._get_attr_value(r_l[-1], 'gene_name')
@@ -511,7 +542,8 @@ class AnnCoordinates(object):
             }]
             return gene_hits
 
-        r = gen_r()
+        gene_type_regex = gen_gene_type_regex()
+        r = gen_r(gene_type_regex)
 
         if len(r):
             self.gene_hits = gen_gene_hits(r)
@@ -520,7 +552,7 @@ class AnnCoordinates(object):
                 colour("[QUERY_GENE] No gene found for {}:{}, "
                        "try to annotate as intergenic region".format(
                         self.chr, self.pos), 'WRN'))
-            self.gene_hits = query_gene_intergenic()
+            self.gene_hits = query_gene_intergenic(gene_type_regex)
 
     def _query_trans(self):
         def gen_r():
@@ -734,6 +766,17 @@ class AnnCoordinates(object):
                     key, self.chr, self.pos, attr), 'WRN'))
             return None
 
+    def _check_if_protein_coding(self, gene_type):
+        protein_coding_regex = "{}$".format(
+            '|'.join(self.protein_coding_types))
+
+        if re.match(
+                protein_coding_regex,
+                gene_type):
+            return True
+        else:
+            return False
+
     def _choose_gene_info(self):
         """
         Selection policy:
@@ -748,17 +791,10 @@ class AnnCoordinates(object):
         Refer: What do the different biotypes in Ensembl mean?
               (https://asia.ensembl.org/Help/Faq?id=468)
         """
-        def check_if_protein_coding(gene_type):
-            if re.match(
-                    r'protein_coding|IG_\w_gene|TR_\w_gene|polymorphic_pseudogene$',
-                    gene_type):
-                return True
-            else:
-                return False
 
         def sort_gene_hits(x):
             gene_len = x['end'] - x['start']
-            if check_if_protein_coding(x['type']):
+            if self._check_if_protein_coding(x['type']):
                 return 10**8 + gene_len
             else:
                 return gene_len
