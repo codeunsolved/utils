@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.9
+# VERSION : v0.0.13
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -35,6 +35,8 @@
 # 3. :AnnCoordinates: optimize logger;
 # UPDATE  : [v0.0.12] June 20 2019
 # 1. :AnnCoordinates: add option to filter non-protein-coding gene;
+# UPDATE  : [v0.0.13] September 7 2019
+# 1. handle intergenic IGH as gene not intergenic;
 
 
 import os
@@ -48,6 +50,8 @@ import numpy as np
 from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
+
+__VERSION__ = 'v0.0.13'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -342,7 +346,7 @@ class AnnCoordinates(object):
         if self.config:
             self.m_con = MysqlConnector(
                 self.config,
-                verbose=self.logger_level >= logging.INFO)
+                verbose=self.logger_level < logging.INFO)
 
     def init_ann(self):
         self.chr_raw = None
@@ -374,6 +378,8 @@ class AnnCoordinates(object):
                 pos = args[1]
 
             self.chr_raw = chr_raw
+            if isinstance(pos, str):
+                pos = re.sub(',', '', pos)
             self.pos = int(pos)
             self.check_chr()
 
@@ -542,6 +548,33 @@ class AnnCoordinates(object):
             }]
             return gene_hits
 
+        def handle_intergenic_igh(gene_hit):
+            def extract_igh_from_intergenic(gene):
+                if 'intergenic' in gene:
+                    intergenic_gene_regex = \
+                        re.match(r'intergenic\(([^,]+), ?([^,]+)\)', gene)
+                    if intergenic_gene_regex:
+                        gene_a, gene_b = intergenic_gene_regex.groups()
+                        if re.match('IGH', gene_a) and re.match('IGH', gene_b):
+                            if re.match('IGH[VDJ]', gene_a):
+                                return gene_a, True
+                            elif re.match('IGH[VDJ]', gene_b):
+                                return gene_b, True
+                            else:
+                                return gene_a, True
+                return gene, False
+
+            gene = gene_hit['name']
+            gene_igh, is_igh = extract_igh_from_intergenic(gene)
+            if is_igh:
+                self.logger.warning(
+                    "[HANDLE_INTERGENIC_IGH] intergenic IGH: {} -> {}".format(
+                        gene, gene_igh))
+                gene_hit['name'] = gene_igh
+                gene_hit['type'] = 'intergenic_igh'
+                # Suppose all IGH* gene are minus strand(-)
+                gene_hit['strand'] = '-'
+
         gene_type_regex = gen_gene_type_regex()
         r = gen_r(gene_type_regex)
 
@@ -553,6 +586,9 @@ class AnnCoordinates(object):
                        "try to annotate as intergenic region".format(
                         self.chr, self.pos), 'WRN'))
             self.gene_hits = query_gene_intergenic(gene_type_regex)
+            assert len(self.gene_hits) == 1
+            # Special case: intergenic IGH
+            handle_intergenic_igh(self.gene_hits[0])
 
     def _query_trans(self):
         def gen_r():
@@ -905,6 +941,10 @@ class AnnCoordinates(object):
 
         if rank_info is None:
             rank_info = {}
+
+        # Special case: intergenic IGH
+        if self.gene_info['type'] == 'intergenic_igh':
+            rank_info['trans_strand'] = '-'
 
         return rank_info
 
