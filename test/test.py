@@ -8,6 +8,7 @@
 import os
 import re
 import sys
+import random
 import argparse
 import unittest
 
@@ -51,7 +52,7 @@ if __name__ == '__main__':
                         help="Specify MYSQL port(default: 3306)")
     parser.add_argument('--mysql_database', type=str, default=None,
                         help="Specify MYSQL databse name")
-    parser.add_argument('--random_seed', type=int, default=0,
+    parser.add_argument('--random_seed', type=int, default=None,
                         help="Specify random seed")
 
     args = parser.parse_args()
@@ -71,6 +72,10 @@ if __name__ == '__main__':
         TestAnnCoordinates.MYSQL_HOST = args.mysql_host
         TestAnnCoordinates.MYSQL_PORT = args.mysql_port
         TestAnnCoordinates.MYSQL_DATABASE = args.mysql_database
-    TestAnnCoordinates.RANDOM_SEED = args.random_seed
+
+    if args.random_seed is None:
+        TestAnnCoordinates.RANDOM_SEED = random.randint(1, 1000)
+    else:
+        TestAnnCoordinates.RANDOM_SEED = args.random_seed
 
     unittest.main(argv=['test.py'], verbosity=2)

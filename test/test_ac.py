@@ -297,3 +297,76 @@ class TestAnnCoordinates(unittest.TestCase):
         self.assertEqual(gene_hit['strand'], '-')
         rank_info = ac.rank_info
         self.assertEqual(rank_info['trans_strand'], '-')
+
+    def test_06_ann_beyond_transcript_range(self):
+        args = deepcopy(self.default_args)
+
+        # BCL6 without specifying transcript map
+        ac = AnnCoordinates(**args)
+        ac.query('chr3', 187462599)
+        gene_info = ac.gene_info
+        self.assertEqual(gene_info['id'], 'ENSG00000113916.17')
+        self.assertEqual(gene_info['name'], 'BCL6')
+        self.assertEqual(gene_info['type'], 'protein_coding')
+        self.assertEqual(gene_info['source'], 'HAVANA')
+        self.assertEqual(gene_info['strand'], '-')
+        rank_info = ac.rank_info
+        self.assertEqual(rank_info['trans_id'], 'ENST00000406870.6')
+        self.assertEqual(rank_info['trans_start'], 187439165)
+        self.assertEqual(rank_info['trans_end'], 187463515)
+        self.assertEqual(rank_info['trans_strand'], '-')
+        self.assertEqual(rank_info['exon_total'], 10)
+        self.assertEqual(rank_info['cds_min'], 3)
+        self.assertEqual(rank_info['cds_max'], 10)
+        self.assertEqual(rank_info['rank'], "Intron1")
+        self.assertEqual(rank_info['exon_num'], 1)
+
+        # BCL6 with specifying transcript map
+        args['transcript_map'] = {
+            'ENST00000232014': {'gene': 'BCL6', 'refseq': 'NM_001130845'}
+        }
+        ac = AnnCoordinates(**args)
+        ac.query('chr3', 187462599)
+        gene_info = ac.gene_info
+        self.assertEqual(gene_info['id'], 'ENSG00000113916.17')
+        self.assertEqual(gene_info['name'], 'BCL6')
+        self.assertEqual(gene_info['type'], 'protein_coding')
+        self.assertEqual(gene_info['source'], 'HAVANA')
+        self.assertEqual(gene_info['strand'], '-')
+        rank_info = ac.rank_info
+        self.assertEqual(rank_info['trans_id'], 'ENST00000232014.8')
+        self.assertEqual(rank_info['trans_start'], 187440186)
+        self.assertEqual(rank_info['trans_end'], 187454357)
+        self.assertEqual(rank_info['trans_strand'], '-')
+        self.assertEqual(rank_info['exon_total'], 10)
+        self.assertEqual(rank_info['cds_min'], 3)
+        self.assertEqual(rank_info['cds_max'], 10)
+        self.assertEqual(rank_info['rank'], "5'UTR")
+        self.assertEqual(rank_info['exon_num'], 0)
+
+    def test_07_ann_special_cases(self):
+        args = deepcopy(self.default_args)
+
+        # intergenic at left most side
+        ac = AnnCoordinates(**args)
+        ac.query('chr2', 100)
+        gene_info = ac.gene_info
+        self.assertIsNone(gene_info['id'])
+        self.assertEqual(gene_info['name'], 'intergenic(-,FAM110C)')
+        self.assertEqual(gene_info['type'], 'intergenic')
+        self.assertEqual(gene_info['start'], 0)
+        self.assertEqual(gene_info['end'], 38814)
+        self.assertIsNone(gene_info['source'])
+        self.assertIsNone(gene_info['strand'])
+
+        # intergenic at right most side
+        ac = AnnCoordinates(**args)
+        ac.query('chr2', 243199373-100)
+        gene_info = ac.gene_info
+        self.assertIsNone(gene_info['id'])
+        self.assertEqual(gene_info['name'], 'intergenic(AC131097.4,-)')
+        self.assertEqual(gene_info['type'], 'intergenic')
+        self.assertEqual(gene_info['start'], 242844702)
+        self.assertEqual(gene_info['end'], 0)
+        self.assertIsNone(gene_info['source'])
+        self.assertIsNone(gene_info['strand'])
