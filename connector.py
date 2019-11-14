@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.4
+# VERSION : v0.0.5
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -16,6 +16,8 @@
 # 2. change line endings to Unix for minimum requirements;
 # UPDATE  : [v0.0.4] December 4 2018
 # 1. add :MongoConnector:;
+# UPDATE  : [v0.0.5] November 13 2019
+# 1. add dictionary support for :MysqlConnector:;
 
 
 import time
@@ -58,8 +60,9 @@ class MysqlConnector(object):
         }
     """
 
-    def __init__(self, config, verbose=False, logger=print):
+    def __init__(self, config, dictionary=False, verbose=False, logger=print):
         self.config = config
+        self.dictionary = dictionary
         self.verbose = verbose
         self.logger = logger
         # Add exceptions
@@ -110,7 +113,7 @@ class MysqlConnector(object):
                 raise e
         else:
             # cursor 'buffered=True' needed to use .fetch* and .rowcount
-            self.cursor = self.conn.cursor(buffered=True)
+            self.cursor = self.conn.cursor(buffered=True, dictionary=self.dictionary)
 
     def select_db(self, db_name):
         msg = "[MysqlConnector] • Select DB: {} ".format(db_name)
