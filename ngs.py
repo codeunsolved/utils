@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.13
+# VERSION : v0.0.14
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -37,6 +37,8 @@
 # 1. :AnnCoordinates: add option to filter non-protein-coding gene;
 # UPDATE  : [v0.0.13] September 7 2019
 # 1. handle intergenic IGH as gene not intergenic;
+# UPDATE  : [v0.0.14] November 14 2019
+# 1. optimize attr index in ::AnnCoordinates::;
 
 
 import os
@@ -51,7 +53,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.13'
+__VERSION__ = 'v0.0.14'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -496,7 +498,7 @@ class AnnCoordinates(object):
         def gen_gene_hits(entries):
             gene_hits = []
             for entry in entries:
-                attr = entry[-1]
+                attr = entry[9]
 
                 gene_id = self._get_attr_value(attr, 'ID')
                 gene_name = self._get_attr_value(attr, 'gene_name')
@@ -529,8 +531,8 @@ class AnnCoordinates(object):
                         gene_type_regex=gene_type_regex)
             r_r = self.m_con.query(sql_r, [self.chr, self.pos]).fetchone()
 
-            gene_name_l = '-' if r_l is None else self._get_attr_value(r_l[-1], 'gene_name')
-            gene_name_r = '-' if r_r is None else self._get_attr_value(r_r[-1], 'gene_name')
+            gene_name_l = '-' if r_l is None else self._get_attr_value(r_l[9], 'gene_name')
+            gene_name_r = '-' if r_r is None else self._get_attr_value(r_r[9], 'gene_name')
             start = 0 if r_l is None else r_l[5]  # Left gene's end
             end = 0 if r_r is None else r_r[4]    # Right gene's start
             name = "intergenic({},{})".format(gene_name_l, gene_name_r)
@@ -614,7 +616,7 @@ class AnnCoordinates(object):
             trans_hits = {}
             for entry in entries:
                 feature = entry[3]
-                attr = entry[-1]
+                attr = entry[9]
                 if feature == 'transcript':
                     gene_id = self._get_attr_value(attr, 'gene_id')
                     if gene_id is not None:
@@ -646,7 +648,7 @@ class AnnCoordinates(object):
                             append_trans_id(gene_id, transcript_id)
 
             for entry in entries:
-                attr = entry[-1]
+                attr = entry[9]
                 transcript_id = self._get_attr_value(attr, 'transcript_id')
                 transcript_id = re.sub(r'_\d+$', '', transcript_id)
 
@@ -655,7 +657,7 @@ class AnnCoordinates(object):
                     'start': int(entry[4]),
                     'end': int(entry[5]),
                     'strand': entry[7],
-                    'attr': entry[-1],
+                    'attr': entry[9],
                 })
             return list(trans_hits.values())
 
