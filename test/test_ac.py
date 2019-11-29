@@ -43,9 +43,8 @@ class TestAnnCoordinates(unittest.TestCase):
 
     @classmethod
     def set_random_seed(cls, random_seed):
-        print("\033[1;32m#\033[0m Random seed: "
-              "\033[1;35m{}\033[0m".format(
-                random_seed))
+        print("\033[1;32m#\033[0m Random seed: \033[1;35m{}\033[0m".format(
+            random_seed))
         np.random.seed(random_seed)
 
     @classmethod
@@ -62,15 +61,24 @@ class TestAnnCoordinates(unittest.TestCase):
             'raise_on_warnings': True
         }
 
+        if not mysql_config['database']:
+            cls.skipTest(cls, "Invalid MySQL databse: {}".format(
+                mysql_config['database']))
+
         try:
             mysql_con = MysqlConnector(
                 mysql_config)
         except Exception as e:
             # Skip all test
-            cls.skipTest(cls, "Invalid MYSQL config: {}".format(e))
+            cls.skipTest(cls, "Invalid MySQL config: {}".format(e))
         else:
             cls.default_args['config'] = mysql_config
             cls.MYSQL_CON = mysql_con
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.MYSQL_CON:
+            cls.MYSQL_CON.close()
 
     def test_00_mysql_con(self):
         args = deepcopy(self.default_args)
@@ -148,7 +156,7 @@ class TestAnnCoordinates(unittest.TestCase):
         self.assertEqual(rank_info['rank'], "5'UTR")
         self.assertEqual(rank_info['exon_num'], 1)
         # Exon20
-        bp = np.random.choice(range(29446208, 29446394+1))
+        bp = np.random.choice(range(29446208, 29446394 + 1))
         ac.query("2:{}".format(bp))
         gene_info = ac.gene_info
         self.assertEqual(gene_info['id'], 'ENSG00000171094.17')
@@ -166,7 +174,7 @@ class TestAnnCoordinates(unittest.TestCase):
         self.assertEqual(rank_info['rank'], "Exon20")
         self.assertEqual(rank_info['exon_num'], 20)
         # Intron10
-        bp = np.random.choice(range(29498093+1, 29498268))
+        bp = np.random.choice(range(29498093 + 1, 29498268))
         ac.query("2:{}".format(bp))
         gene_info = ac.gene_info
         self.assertEqual(gene_info['id'], 'ENSG00000171094.17')
@@ -361,7 +369,7 @@ class TestAnnCoordinates(unittest.TestCase):
 
         # intergenic at right most side
         ac = AnnCoordinates(**args)
-        ac.query('chr2', 243199373-100)
+        ac.query('chr2', 243199373 - 100)
         gene_info = ac.gene_info
         self.assertIsNone(gene_info['id'])
         self.assertEqual(gene_info['name'], 'intergenic(AC131097.4,-)')
