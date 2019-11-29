@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.8
+# VERSION : v0.0.9
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -25,8 +25,11 @@
 # UPDATE  : [v0.0.8] November 29 2019
 # 1. add retry mechanism to :MysqlConnector:;
 # 2. rename `reconnect()` to `connect()`;
+# UPDATE  : [v0.0.9] November 29 2019
+# 1. replace default logger(print) to logging logger;
 
 import time
+import logging
 from collections import defaultdict
 
 
@@ -44,7 +47,7 @@ def stats_performance(func):
         START = time.time()
         results = func(*args, **kw)
         COST = time.time() - START
-        self.log("[{}] {} rows affected, cost {}s".format(
+        self.logger.debug("[{}] {} rows affected, cost {}s".format(
             self.__class__.__name__,
             self.cursor.rowcount,
             round(COST, 7)))
@@ -67,15 +70,16 @@ class MysqlConnector(object):
         }
     """
 
-    def __init__(self, config, dictionary=False, retry_n=7, retry_sleep=0.5, verbose=False, logger=print):
+    def __init__(self, config, dictionary=False, retry_n=7, retry_sleep=0.5, verbose=False):
         self.config = config
         self.dictionary = dictionary
 
         self.retry_n = retry_n
         self.retry_sleep = retry_sleep
 
+        # Logger
         self.verbose = verbose
-        self.logger = logger
+        self.logger = self.init_logger()
 
         # MySQLConnection
         self.conn = None
@@ -90,9 +94,12 @@ class MysqlConnector(object):
         # Connect
         self.connect()
 
-    def log(self, msg, verbose=False):
-        if verbose or self.verbose:
-            self.logger(msg)
+    def init_logger(self):
+        logger = logging.getLogger(self.__class__.__name__)
+
+        if self.verbose:
+            logger.setLevel(logging.DEBUG)
+        return logger
 
     def _commit(self):
         self.conn.commit()
@@ -109,12 +116,12 @@ class MysqlConnector(object):
             try:
                 self.cursor.execute(sql, vals)
             except Exception as e:
-                self.log("[MysqlConnector] Error when to execute SQL! {}".format(e), verbose=True)
+                self.logger.debug("Error when to execute SQL! {}".format(e))
 
                 if e.errno in [2006,   # Error: MySQL server has gone away
                                2013]:  # Error: Lost connection to MySQL server during query
                     if retry:
-                        self.log("[MysqlConnector] Retry execute! Remaining retries: {}".format(retry), verbose=True)
+                        self.logger.debug("Retry execute! Remaining retries: {}".format(retry))
                         time.sleep(self.retry_sleep)
                         self.connect()  # reconnect
                         retry -= 1
@@ -138,13 +145,13 @@ class MysqlConnector(object):
             try:
                 self.conn = self.mysql.connector.connect(**config)
             except self.mysql.connector.Error as e:
-                self.log("[MysqlConnector] Error when to connect MySQL! {}".format(e), verbose=True)
+                self.logger.debug("Error when to connect MySQL! {}".format(e))
 
                 if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
-                    raise Exception("[MysqlConnector] Connect failed! Username or password incorrect.")
+                    raise Exception("Connect failed! Username or password incorrect.")
                 else:
                     if retry:
-                        self.log("[MysqlConnector] Retry connect! Remaining retries: {}".format(retry), verbose=True)
+                        self.logger.debug("Retry connect! Remaining retries: {}".format(retry))
                         time.sleep(self.retry_sleep)
                         retry -= 1
                         self.stats['cnn_retry'] += 1
@@ -157,7 +164,7 @@ class MysqlConnector(object):
                 return True
 
     def select_db(self, db_name):
-        msg = "[MysqlConnector] • Select DB: {} ".format(db_name)
+        msg = "• Select DB: {} ".format(db_name)
         try:
             self.conn.database = db_name
         except self.mysql.connector.Error as e:
@@ -167,17 +174,17 @@ class MysqlConnector(object):
                 raise e
         else:
             msg += "OK!"
-        self.log(msg)
+        self.logger.debug(msg)
 
     def create_db(self, db_name):
-        msg = "[MysqlConnector] • Create database: {} ".format(db_name)
+        msg = " • Create database: {} ".format(db_name)
         try:
             self.cursor.execute("CREATE DATABASE {} DEFAULT CHARACTER SET 'utf8'".format(db_name))
         except self.mysql.connector.Error as e:
             raise e
         else:
             msg += "OK!"
-        self.log(msg, verbose=True)
+        self.logger.debug(msg, verbose=True)
 
     def select(self, tab, where_dict, cols_selected='*', filter_='='):
         cols, vals = zip(*where_dict.items())
@@ -274,19 +281,26 @@ class PostgresqlConnector(object):
         }
     """
 
-    def __init__(self, config, verbose=False, logger=print):
+    def __init__(self, config, verbose=False):
         self.config = config
+
+        # Debug
         self.verbose = verbose
-        self.logger = logger
+        self.logger = self.init_logger()
+
         # Add exceptions
         self.DoesNotExist = DoesNotExist
         self.MultipleObjectsReturned = MultipleObjectsReturned
+
         # Connect
         self.connect()
 
-    def log(self, msg, verbose=False):
-        if verbose or self.verbose:
-            self.logger(msg)
+    def init_logger(self):
+        logger = logging.getLogger(self.__class__.__name__)
+
+        if self.verbose:
+            logger.setLevel(logging.DEBUG)
+        return logger
 
     def _commit(self):
         self.conn.commit()
@@ -374,20 +388,27 @@ class MongoConnector(object):
         }
     """
 
-    def __init__(self, config, verbose=False, logger=print):
+    def __init__(self, config, verbose=False):
         self.config = config
+
+        # Debug
         self.verbose = verbose
-        self.logger = logger
+        self.logger = self.init_logger()
+
         # Add exceptions
         self.DoesNotExist = DoesNotExist
         self.MultipleObjectsReturned = MultipleObjectsReturned
+
         # Connect
         self.uri = None
         self.connect(self.config)
 
-    def log(self, msg, verbose=False):
-        if verbose or self.verbose:
-            self.logger(msg)
+    def init_logger(self):
+        logger = logging.getLogger(self.__class__.__name__)
+
+        if self.verbose:
+            logger.setLevel(logging.DEBUG)
+        return logger
 
     def gen_uri(self, config):
         if 'username' in config and 'password' in config and 'authsource' in config:
