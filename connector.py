@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.7
+# VERSION : v0.0.8
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -22,8 +22,12 @@
 # 1. optimize and add :MongoConnector: functions;
 # UPDATE  : [v0.0.7] November 13 2019
 # 1. add dictionary support for :MysqlConnector:;
+# UPDATE  : [v0.0.8] November 29 2019
+# 1. add retry mechanism to :MysqlConnector:;
+# 2. rename `reconnect()` to `connect()`;
 
 import time
+from collections import defaultdict
 
 
 class DoesNotExist(Exception):
@@ -63,19 +67,28 @@ class MysqlConnector(object):
         }
     """
 
-    def __init__(self, config, dictionary=False, verbose=False, logger=print):
+    def __init__(self, config, dictionary=False, retry_n=7, retry_sleep=0.5, verbose=False, logger=print):
         self.config = config
         self.dictionary = dictionary
+
+        self.retry_n = retry_n
+        self.retry_sleep = retry_sleep
+
         self.verbose = verbose
         self.logger = logger
+
+        # MySQLConnection
+        self.conn = None
+        self.cursor = None
+
+        # Debug
+        self.stats = defaultdict(int)
+
         # Add exceptions
         self.DoesNotExist = DoesNotExist
         self.MultipleObjectsReturned = MultipleObjectsReturned
         # Connect
-        self.connect(self.config)
-        # Select DB if specified
-        if 'database' in self.config:
-            self.select_db(self.config['database'])
+        self.connect()
 
     def log(self, msg, verbose=False):
         if verbose or self.verbose:
@@ -88,36 +101,60 @@ class MysqlConnector(object):
         self.conn.rollback()
 
     @stats_performance
-    def _execute(self, sql, vals, retry=True):
-        try:
-            self.cursor.execute(sql, vals)
-        except Exception as e:
-            if e.errno in [2006,   # Error: MySQL server has gone away
-                           2013]:  # Error: Lost connection to MySQL server during query
-                self.log("[MysqlConnector] {}{}".format(e, ', retry!' if retry else ''), verbose=True)
-                if retry:
-                    self.reconnect()
-                    self._execute(sql, vals, retry=False)
-                else:
-                    raise e
-            elif e.errno == 1062:   # Error: Duplicate entry '%s' for key %d
-                self.log("[MysqlConnector] {}".format(e), verbose=True)
-            else:
-                raise e
-        else:
-            self._commit()
+    def _execute(self, sql, vals):
+        self.stats['exe_retry'] = 0
 
-    def connect(self, config):
-        try:
-            self.conn = self.mysql.connector.connect(**config)
-        except self.mysql.connector.Error as e:
-            if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
-                raise Exception("[MysqlConnector] Connect failed! Username or password incorrect.")
+        retry = self.retry_n
+        while retry + 1:
+            try:
+                self.cursor.execute(sql, vals)
+            except Exception as e:
+                self.log("[MysqlConnector] Error when to execute SQL! {}".format(e), verbose=True)
+
+                if e.errno in [2006,   # Error: MySQL server has gone away
+                               2013]:  # Error: Lost connection to MySQL server during query
+                    if retry:
+                        self.log("[MysqlConnector] Retry execute! Remaining retries: {}".format(retry), verbose=True)
+                        time.sleep(self.retry_sleep)
+                        self.connect()  # reconnect
+                        retry -= 1
+                        self.stats['exe_retry'] += 1
+                    else:
+                        raise e
+                elif e.errno == 1062:   # Error: Duplicate entry '%s' for key %d
+                    return False
+                else:
+                    setattr(e, 'retry', self.stats['exe_retry'])  # For debug
+                    raise e
             else:
-                raise e
-        else:
-            # cursor 'buffered=True' needed to use .fetch* and .rowcount
-            self.cursor = self.conn.cursor(buffered=True, dictionary=self.dictionary)
+                self._commit()
+                return True
+
+    def _connect(self, config):
+        self.stats['cnn_retry'] = 0
+
+        retry = self.retry_n
+        while retry + 1:
+            try:
+                self.conn = self.mysql.connector.connect(**config)
+            except self.mysql.connector.Error as e:
+                self.log("[MysqlConnector] Error when to connect MySQL! {}".format(e), verbose=True)
+
+                if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
+                    raise Exception("[MysqlConnector] Connect failed! Username or password incorrect.")
+                else:
+                    if retry:
+                        self.log("[MysqlConnector] Retry connect! Remaining retries: {}".format(retry), verbose=True)
+                        time.sleep(self.retry_sleep)
+                        retry -= 1
+                        self.stats['cnn_retry'] += 1
+                    else:
+                        setattr(e, 'retry', self.stats['cnn_retry'])  # For debug
+                        raise e
+            else:
+                # cursor 'buffered=True' needed to use .fetch* and .rowcount
+                self.cursor = self.conn.cursor(buffered=True, dictionary=self.dictionary)
+                return True
 
     def select_db(self, db_name):
         msg = "[MysqlConnector] • Select DB: {} ".format(db_name)
@@ -139,7 +176,7 @@ class MysqlConnector(object):
         except self.mysql.connector.Error as e:
             raise e
         else:
-            msg += "OK!\n"
+            msg += "OK!"
         self.log(msg, verbose=True)
 
     def select(self, tab, where_dict, cols_selected='*', filter_='='):
@@ -214,11 +251,13 @@ class MysqlConnector(object):
         self.cursor.close()
         self.conn.close()
 
-    def reconnect(self):
-        self.connect(self.config)
+    def connect(self):
+        self._connect(self.config)
+
         # Select DB if specified
-        if 'database' in self.config:
-            self.select_db(self.config['database'])
+        database = self.config.get('database')
+        if database:
+            self.select_db(database)
 
 
 class PostgresqlConnector(object):
