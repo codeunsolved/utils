@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.9
+# VERSION : v0.0.10
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -27,6 +27,8 @@
 # 2. rename `reconnect()` to `connect()`;
 # UPDATE  : [v0.0.9] November 29 2019
 # 1. replace default logger(print) to logging logger;
+# UPDATE  : [v0.0.10] November 30 2019
+# 1. add mysql.connector.errors.DatabaseError to :MysqlConnector:‘s retry mechanism;
 
 import time
 import logging
@@ -116,12 +118,12 @@ class MysqlConnector(object):
             try:
                 self.cursor.execute(sql, vals)
             except Exception as e:
-                self.logger.debug("Error when to execute SQL! {}".format(e))
+                self.logger.error("Error when to execute SQL! {}".format(e))
 
                 if e.errno in [2006,   # Error: MySQL server has gone away
                                2013]:  # Error: Lost connection to MySQL server during query
                     if retry:
-                        self.logger.debug("Retry execute! Remaining retries: {}".format(retry))
+                        self.logger.error("Retry execute! Remaining retries: {}".format(retry))
                         time.sleep(self.retry_sleep)
                         self.connect()  # reconnect
                         retry -= 1
@@ -144,14 +146,15 @@ class MysqlConnector(object):
         while retry + 1:
             try:
                 self.conn = self.mysql.connector.connect(**config)
-            except self.mysql.connector.Error as e:
-                self.logger.debug("Error when to connect MySQL! {}".format(e))
+            except (self.mysql.connector.Error,
+                    self.mysql.connector.errors.DatabaseError) as e:
+                self.logger.error("Error when to connect MySQL! {}".format(e))
 
                 if e.errno == 1045:    # Error: Access denied for user '%s'@'%s' (using password: %s)
                     raise Exception("Connect failed! Username or password incorrect.")
                 else:
                     if retry:
-                        self.logger.debug("Retry connect! Remaining retries: {}".format(retry))
+                        self.logger.error("Retry connect! Remaining retries: {}".format(retry))
                         time.sleep(self.retry_sleep)
                         retry -= 1
                         self.stats['cnn_retry'] += 1
