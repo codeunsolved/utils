@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.10
+# VERSION : v0.0.11
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -29,6 +29,8 @@
 # 1. replace default logger(print) to logging logger;
 # UPDATE  : [v0.0.10] November 30 2019
 # 1. add mysql.connector.errors.DatabaseError to :MysqlConnector:‘s retry mechanism;
+# UPDATE  : [v0.0.11] January 2 2020
+# 1. add `commit()` to :MysqlConnector:‘s retry mechanism to handle 2013 error;
 
 import time
 import logging
@@ -117,6 +119,7 @@ class MysqlConnector(object):
         while retry + 1:
             try:
                 self.cursor.execute(sql, vals)
+                self._commit()
             except Exception as e:
                 self.logger.error("Error when to execute SQL! {}".format(e))
 
@@ -136,7 +139,6 @@ class MysqlConnector(object):
                     setattr(e, 'retry', self.stats['exe_retry'])  # For debug
                     raise e
             else:
-                self._commit()
                 return True
 
     def _connect(self, config):
