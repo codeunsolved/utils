@@ -372,8 +372,8 @@ class AnnCoordinates(object):
                 if ':' in bp:
                     chr_raw, pos = bp.split(':')
                 else:
-                    self.logger.error(
-                        colour("[HANDLE_BP] Invalid Breakpoint: {}".format(
+                    self.logger.error(colour(
+                        "[HANDLE_BP] Invalid Breakpoint: {}".format(
                             bp), 'ERR'))
             elif len(args) == 2:
                 chr_raw = args[0]
@@ -396,8 +396,8 @@ class AnnCoordinates(object):
             try:
                 self._query_gene()
             except Exception as e:
-                self.logger.error(
-                    colour("[QUERY_GENE] Error! {}:{}, {}".format(
+                self.logger.error(colour(
+                    "[QUERY_GENE] Error! {}:{}, {}".format(
                         self.chr, self.pos, e), 'ERR'))
             else:
                 self.logger.info(
@@ -410,8 +410,8 @@ class AnnCoordinates(object):
             try:
                 self._query_trans()
             except Exception as e:
-                self.logger.error(
-                    colour("[QUERY_TRANS] Error! {}:{}, {}".format(
+                self.logger.error(colour(
+                    "[QUERY_TRANS] Error! {}:{}, {}".format(
                         self.chr, self.pos, e), 'ERR'))
             else:
                 self.logger.info(
@@ -451,7 +451,8 @@ class AnnCoordinates(object):
             region = retrieve_region_cache(self.chr, self.pos)
 
             if self.use_cache and region is not None:
-                self.logger.info("[QUERY] Use region cache for {} hit by {}".format(
+                self.logger.info(
+                    "[QUERY] Use region cache for {} hit by {}".format(
                         coord, region['gene_info']['name']))
 
                 self.trans_hits = copy(region['trans_hits'])
@@ -485,11 +486,12 @@ class AnnCoordinates(object):
             return gene_type_regex
 
         def gen_r(gene_type_regex):
-            sql = "SELECT * FROM `{tab}` " \
-                  "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                  "Start <= %s AND End >= %s{gene_type_regex}".format(
-                    tab=self.ann_tab,
-                    gene_type_regex=gene_type_regex)
+            sql = ("SELECT * FROM `{tab}` "
+                   "WHERE SeqID = %s AND Feature = 'gene' AND "
+                   "Start <= %s AND End >= %s{gene_type_regex}")
+            sql = sql.format(
+                tab=self.ann_tab,
+                gene_type_regex=gene_type_regex)
 
             c = self.m_con.query(sql, [self.chr, self.pos, self.pos])
             r = c.fetchall()
@@ -518,17 +520,20 @@ class AnnCoordinates(object):
             return gene_hits
 
         def query_gene_intergenic(gene_type_regex):
-            sql_l = "SELECT * FROM `{tab}` " \
-                    "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                    "End < %s{gene_type_regex} ORDER BY End DESC LIMIT 1".format(
-                        tab=self.ann_tab,
-                        gene_type_regex=gene_type_regex)
+            sql_l = ("SELECT * FROM `{tab}` "
+                     "WHERE SeqID = %s AND Feature = 'gene' AND "
+                     "End < %s{gene_type_regex} ORDER BY End DESC LIMIT 1")
+            sql_l = sql_l.format(
+                tab=self.ann_tab,
+                gene_type_regex=gene_type_regex)
+
             r_l = self.m_con.query(sql_l, [self.chr, self.pos]).fetchone()
-            sql_r = "SELECT * FROM `{tab}` " \
-                    "WHERE SeqID = %s AND Feature = 'gene' AND " \
-                    "Start > %s{gene_type_regex} ORDER BY Start LIMIT 1".format(
-                        tab=self.ann_tab,
-                        gene_type_regex=gene_type_regex)
+            sql_r = ("SELECT * FROM `{tab}` "
+                     "WHERE SeqID = %s AND Feature = 'gene' AND "
+                     "Start > %s{gene_type_regex} ORDER BY Start LIMIT 1")
+            sql_r = sql_r.format(
+                tab=self.ann_tab,
+                gene_type_regex=gene_type_regex)
             r_r = self.m_con.query(sql_r, [self.chr, self.pos]).fetchone()
 
             gene_name_l = '-' if r_l is None else self._get_attr_value(r_l[9], 'gene_name')
@@ -583,10 +588,10 @@ class AnnCoordinates(object):
         if len(r):
             self.gene_hits = gen_gene_hits(r)
         else:
-            self.logger.warning(
-                colour("[QUERY_GENE] No gene found for {}:{}, "
-                       "try to annotate as intergenic region".format(
-                        self.chr, self.pos), 'WRN'))
+            self.logger.warning(colour(
+                "[QUERY_GENE] No gene found for {}:{}, "
+                "try to annotate as intergenic region".format(
+                    self.chr, self.pos), 'WRN'))
             self.gene_hits = query_gene_intergenic(gene_type_regex)
             assert len(self.gene_hits) == 1
             # Special case: intergenic IGH
@@ -594,11 +599,11 @@ class AnnCoordinates(object):
 
     def _query_trans(self):
         def gen_r():
-            sql = "SELECT * FROM `{tab}` " \
-                  "WHERE SeqID = %s AND Feature IN " \
-                  "('transcript', 'exon', 'CDS', 'five_prime_UTR', 'three_prime_UTR') " \
-                  "AND Attribute LIKE %s ORDER BY Start".format(
-                    tab=self.ann_tab)
+            sql = ("SELECT * FROM `{tab}` "
+                   "WHERE SeqID = %s AND Feature IN "
+                   "('transcript', 'exon', 'CDS', 'five_prime_UTR', 'three_prime_UTR') "
+                   "AND Attribute LIKE %s ORDER BY Start")
+            sql = sql.format(tab=self.ann_tab)
 
             r = []
             for gene in self.gene_hits:
@@ -628,7 +633,7 @@ class AnnCoordinates(object):
                                 'gene_id': gene_id,
                                 'start': int(entry[4]),
                                 'end': int(entry[5]),
-                                'size': int(entry[5]-entry[4]),
+                                'size': int(entry[5] - entry[4]),
                                 'strand': entry[7],
                                 'components': [],
                                 'rank_info': {
@@ -667,8 +672,8 @@ class AnnCoordinates(object):
             self.trans_hits = gen_trans_hits(r)
         else:
             if len([x for x in self.gene_hits if x['id'] is not None]):
-                self.logger.error(
-                    colour("[QUERY_TRANS] No trasncripts found for [{}]".format(
+                self.logger.error(colour(
+                    "[QUERY_TRANS] No trasncripts found for [{}]".format(
                         ', '.join([x['name'] for x in self.gene_hits])), 'ERR'))
 
     def set_rank_info(self):
@@ -732,9 +737,9 @@ class AnnCoordinates(object):
                     else:
                         strand_flag = 0
 
-                    if strand_flag*loc_flag == 1:
+                    if strand_flag * loc_flag == 1:
                         rank = "3'UTR"
-                    elif strand_flag*loc_flag == -1:
+                    elif strand_flag * loc_flag == -1:
                         rank = "5'UTR"
                     else:
                         rank = ''
@@ -742,15 +747,15 @@ class AnnCoordinates(object):
                     exon_num = 0
 
                     if transcript_id == self.default_transcript:
-                        self.logger.warning(
-                            colour("[SET_RANK] {}:{} seems {} than "
-                                   "the range of transcript: {}({}) {}-{}, "
-                                   "use {} instead".format(
-                                    self.chr, self.pos,
-                                    'LESS' if loc_flag == -1 else 'LARGE',
-                                    transcript_id, trans['strand'],
-                                    trans['start'], trans['end'],
-                                    rank), 'WRN'))
+                        self.logger.warning(colour(
+                            "[SET_RANK] {}:{} seems {} than "
+                            "the range of transcript: {}({}) {}-{}, "
+                            "use {} instead".format(
+                                self.chr, self.pos,
+                                'LESS' if loc_flag == -1 else 'LARGE',
+                                transcript_id, trans['strand'],
+                                trans['start'], trans['end'],
+                                rank), 'WRN'))
                 rank_info['rank'] = rank
                 rank_info['exon_num'] = exon_num
 
@@ -775,7 +780,7 @@ class AnnCoordinates(object):
                         if re.match('Intron', rank_info['rank']):
                             if exon_num == rank_info['exon_num']:
                                 rank_info['exon_end'] = end
-                            elif exon_num == rank_info['exon_num']+1:
+                            elif exon_num == rank_info['exon_num'] + 1:
                                 rank_info['exon_start'] = start
                         else:
                             if exon_num == rank_info['exon_num']:
@@ -799,8 +804,8 @@ class AnnCoordinates(object):
         if s is not None:
             return s.group(1)
         else:
-            self.logger.warning(
-                colour("[GET_ATTR_VALUE] No '{}' in attributes: {}:{} - ({})".format(
+            self.logger.warning(colour(
+                "[GET_ATTR_VALUE] No '{}' in attributes: {}:{} - ({})".format(
                     key, self.chr, self.pos, attr), 'WRN'))
             return None
 
@@ -850,8 +855,8 @@ class AnnCoordinates(object):
                 trans_id_main = re.sub(r'\.\d+$', '', trans_id)
                 if trans_id_main in self.transcript_map:
                     gene_info = copy(x)
-                    self.logger.warning(
-                        colour("[CHOOSE_GENE] Use {}({}) due to {} in 'transcript_map'".format(
+                    self.logger.warning(colour(
+                        "[CHOOSE_GENE] Use {}({}) due to {} in 'transcript_map'".format(
                             gene_info['id'], gene_info['name'], trans_id_main), 'WRN'))
                     break
             if gene_info is not None:
@@ -862,24 +867,24 @@ class AnnCoordinates(object):
             gene_hits_sorted = sorted(self.gene_hits, key=sort_gene_hits, reverse=True)
             gene_info = copy(gene_hits_sorted[0])
 
-            self.logger.warning(
-                colour("[CHOOSE_GENE] Use largest (protein coding) gene "
-                       "as default: {}({}) {}".format(
-                        gene_info['id'], gene_info['name'], gene_info['type']), 'WRN'))
+            self.logger.warning(colour(
+                "[CHOOSE_GENE] Use largest (protein coding) gene "
+                "as default: {}({}) {}".format(
+                    gene_info['id'], gene_info['name'], gene_info['type']), 'WRN'))
 
         if gene_info is None:
             gene_info = {}
 
         # Map gene name
         if gene_info.get('name', None) in self.gene_map:
-            self.logger.warning(
-                colour("[CHOOSE_GENE] Gene name changed via 'gene_map': {} -> {}".format(
+            self.logger.warning(colour(
+                "[CHOOSE_GENE] Gene name changed via 'gene_map': {} -> {}".format(
                     gene_info['name'], self.gene_map[gene_info['name']]), 'WRN'))
             gene_info['name'] = self.gene_map[gene_info['name']]
 
         if len(self.gene_hits) > 1:
-            self.logger.warning(
-                colour("[CHOOSE_GENE] {} entries [{}] found for {}:{}, choose: {}".format(
+            self.logger.warning(colour(
+                "[CHOOSE_GENE] {} entries [{}] found for {}:{}, choose: {}".format(
                     len(self.gene_hits), ', '.join([x['name'] for x in self.gene_hits]),
                     self.chr, self.pos, gene_info['name']), 'WRN'))
 
@@ -910,8 +915,8 @@ class AnnCoordinates(object):
         # Policy 2
         if default_transcript is None:
             if len(trans_hits_sorted):
-                self.logger.warning(
-                    colour("[CHOOSE_TRANSCRIPT] Use longest transcript as default: {} for {}".format(
+                self.logger.warning(colour(
+                    "[CHOOSE_TRANSCRIPT] Use longest transcript as default: {} for {}".format(
                         trans_hits_sorted[0]['id'], self.gene_info['name']), 'WRN'))
                 default_transcript = trans_hits_sorted[0]['id']
 
