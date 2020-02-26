@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.14
+# VERSION : v0.0.15
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -38,8 +38,9 @@
 # UPDATE  : [v0.0.13] September 7 2019
 # 1. handle intergenic IGH as gene not intergenic;
 # UPDATE  : [v0.0.14] November 14 2019
-# 1. optimize attr index in ::AnnCoordinates::;
-
+# 1. optimize attr index in :AnnCoordinates:;
+# UPDATE  : [v0.0.15] February 26 2020
+# 1. :AnnCoordinates: set rank to 'intragenic' if the coordinate out of transcript;
 
 import os
 import re
@@ -53,7 +54,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.14'
+__VERSION__ = 'v0.0.15'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -287,7 +288,7 @@ class AnnCoordinates(object):
         # 'trans_strand': +/-
         # If an exon or part of an exon belongs to UTR,
         # it will annotate as UTR.
-        # 'rank': 'Exon{N}', 'Intron{N}', "5'UTR", "3'UTR"
+        # 'rank': 'Exon{N}', 'Intron{N}', "5'UTR", "3'UTR", 'intragenic'
         # 'exon_num': {N}
         # 'exon_total': {N}
         # 'cds_min': {N}
@@ -697,6 +698,9 @@ class AnnCoordinates(object):
                 else:
                     return feature
 
+            rank = None
+            exon_num = 0
+
             for trans in self.trans_hits:
                 transcript_id = trans['id']
                 rank_info = trans['rank_info']
@@ -738,13 +742,15 @@ class AnnCoordinates(object):
                         strand_flag = 0
 
                     if strand_flag * loc_flag == 1:
-                        rank = "3'UTR"
+                        # rank = "3'UTR"
+                        rank = "intragenic"
+                        exon_num = -3
                     elif strand_flag * loc_flag == -1:
-                        rank = "5'UTR"
+                        # rank = "5'UTR"
+                        rank = "intragenic"
+                        exon_num = -5
                     else:
                         rank = ''
-
-                    exon_num = 0
 
                     if transcript_id == self.default_transcript:
                         self.logger.warning(colour(

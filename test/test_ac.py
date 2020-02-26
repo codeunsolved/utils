@@ -349,8 +349,8 @@ class TestAnnCoordinates(unittest.TestCase):
         self.assertEqual(rank_info['exon_total'], 10)
         self.assertEqual(rank_info['cds_min'], 3)
         self.assertEqual(rank_info['cds_max'], 10)
-        self.assertEqual(rank_info['rank'], "5'UTR")
-        self.assertEqual(rank_info['exon_num'], 0)
+        self.assertEqual(rank_info['rank'], "intragenic")
+        self.assertEqual(rank_info['exon_num'], -5)
 
     def test_07_ann_special_cases(self):
         args = deepcopy(self.default_args)
