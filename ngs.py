@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.15
+# VERSION : v0.0.16
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -41,6 +41,8 @@
 # 1. optimize attr index in :AnnCoordinates:;
 # UPDATE  : [v0.0.15] February 26 2020
 # 1. :AnnCoordinates: set rank to 'intragenic' if the coordinate out of transcript;
+# UPDATE  : [v0.0.16] March 19 2020
+# 1. :AnnCoordinates: adjust the framework to prepare to support a new source (RefSeq);
 
 import os
 import re
@@ -54,7 +56,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.15'
+__VERSION__ = 'v0.0.16'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -231,28 +233,30 @@ class VcfParser(object):
 
 class AnnCoordinates(object):
 
-    def __init__(self, config=None, mysql_con=None,
+    def __init__(self,
+                 mysql_config=None, mysql_con=None,
                  gene_map={}, transcript_map={},
-                 refer='hg19', ann_source='GENCODE', ann_gene_type='protein_coding',
+                 refer='hg19',
+                 ann_source='GENCODE',
+                 ann_tab=None,
+                 ann_gene_type='protein_coding',
                  use_cache=True,
                  logger_name=None, logger_level=logging.INFO):
+
         # Configs
-        self.config = config
-        self.m_con = mysql_con
+        self.mysql_config = mysql_config
+        self.mysql_con = mysql_con
 
         # Options
         self.gene_map = gene_map
         self.transcript_map = transcript_map
         self.refer = refer
         self.ann_source = ann_source
+        self.ann_tab = ann_tab
         self.ann_gene_type = ann_gene_type
         self.use_cache = use_cache
         self.logger_name = logger_name or self.__class__.__name__
         self.logger_level = logger_level
-
-        assert self.ann_gene_type in ['protein_coding', 'all']
-
-        self.ann_tab = None
 
         # Coordinates
         self.chr_raw = None  # original chr
@@ -263,8 +267,8 @@ class AnnCoordinates(object):
         # Annotations
         # Gene hits contains {key: val}:
         # 'id': Ensembl gene ID
-        # 'name': GENECODE gene name
-        # 'type': GENECODE gene type
+        # 'name': GENCODE gene name
+        # 'type': GENCODE gene type
         # 'chr': chromosome
         # 'source': entry source
         # 'start': {N}
@@ -317,10 +321,17 @@ class AnnCoordinates(object):
         self.logger = self.init_logger()
 
         # Check params validation
-        self.check_refer()
+        self.check_params()
 
-        self.connect_db()
-        assert self.m_con is not None
+        # Set annotation table (only used by GENCODE)
+        if self.ann_source == 'GENCODE':
+            self.set_ann_tab()
+
+        # Init MySQL connection (only used by GENCODE)
+        if self.ann_source == 'GENCODE':
+            if self.mysql_con is None:
+                self.connect_db()
+            assert self.mysql_con is not None
 
     def init_logger(self):
         logger = logging.getLogger(self.logger_name)
@@ -331,13 +342,27 @@ class AnnCoordinates(object):
         logger.setLevel(self.logger_level)
         return logger
 
-    def check_refer(self):
-        assert self.refer in ['hg19', 'hg38']
-        assert self.ann_source in ['GENCODE']
+    def check_params(self):
+        valid_refers = ['hg19', 'hg38']
+        assert self.refer in valid_refers, \
+            "Unexpected reference genome: {}! Valid choices: {}".format(
+                self.refer, valid_refers)
 
-        self.ann_tab = self.ann_tabs[self.refer][self.ann_source]
+        valid_ann_sources = ['GENCODE', 'RefSeq']
+        assert self.ann_source in valid_ann_sources, \
+            "Unexpected annotation source: {}! Valid choices: {}".format(
+                self.ann_source, valid_ann_sources)
 
-    def check_chr(self):
+        valid_ann_gene_type = ['protein_coding', 'all']
+        assert self.ann_gene_type in valid_ann_gene_type, \
+            "Unexpected annotation gene type: {}! Valid choices: {}".format(
+                self.ann_gene_type, valid_ann_gene_type)
+
+    def set_ann_tab(self):
+        if self.ann_tab is None:
+            self.ann_tab = self.ann_tabs[self.refer][self.ann_source]
+
+    def format_chr(self):
         self.chr_index = re.sub('^chr', '', self.chr_raw.lower()).upper()
         self.chr = 'chr' + self.chr_index
 
@@ -346,9 +371,9 @@ class AnnCoordinates(object):
                 color_term("[CHECK_CHR] Unrecognized Chr: {}".format(self.chr_raw), 'WRN'))
 
     def connect_db(self):
-        if self.config:
-            self.m_con = MysqlConnector(
-                self.config,
+        if self.mysql_config:
+            self.mysql_con = MysqlConnector(
+                self.mysql_config,
                 verbose=self.logger_level < logging.INFO)
 
     def init_ann(self):
@@ -384,7 +409,7 @@ class AnnCoordinates(object):
             if isinstance(pos, str):
                 pos = re.sub(',', '', pos)
             self.pos = int(pos)
-            self.check_chr()
+            self.format_chr()
 
         def retrieve_region_cache(chr_, pos):
             for region in self.region_cache:
@@ -392,34 +417,6 @@ class AnnCoordinates(object):
                    region['start'] <= pos and pos <= region['end']:
                     return region
             return None
-
-        def query_gene():
-            try:
-                self._query_gene()
-            except Exception as e:
-                self.logger.error(colour(
-                    "[QUERY_GENE] Error! {}:{}, {}".format(
-                        self.chr, self.pos, e), 'ERR'))
-            else:
-                self.logger.info(
-                    "• Query gene {}! {} hits genes: {}".format(
-                        colour("OK", 'green'),
-                        colour(len(self.gene_hits), 'green'),
-                        [x['name'] for x in self.gene_hits]))
-
-        def query_trans():
-            try:
-                self._query_trans()
-            except Exception as e:
-                self.logger.error(colour(
-                    "[QUERY_TRANS] Error! {}:{}, {}".format(
-                        self.chr, self.pos, e), 'ERR'))
-            else:
-                self.logger.info(
-                    "• Query transcripts {}! {} hits transcripts: {}".format(
-                        colour("OK", 'green'),
-                        colour(len(self.trans_hits), 'green'),
-                        [x['id'] for x in self.trans_hits]))
 
         def cache_coord(coord):
             self.coord_cache[coord]['gene_info'] = copy(self.gene_info)
@@ -463,8 +460,8 @@ class AnnCoordinates(object):
                 self.set_rank_info()
                 self.rank_info = self._choose_rank_info()
             else:
-                query_gene()
-                query_trans()
+                self.query_gene()
+                self.query_trans()
 
                 self.gene_info = self._choose_gene_info()
                 self.default_transcript = self._choose_default_transcript()
@@ -475,7 +472,52 @@ class AnnCoordinates(object):
             cache_coord(coord)
             cache_region()
 
-    def _query_gene(self):
+    def query_gene(self):
+        try:
+            if self.ann_source == 'GENCODE':
+                self._query_gene_via_gencode()
+            elif self.ann_source == 'RefSeq':
+                self._query_gene_via_refseq()
+        except Exception as e:
+            self.logger.error(colour(
+                "[QUERY_GENE] Error! {}:{}, {}".format(
+                    self.chr, self.pos, e), 'ERR'))
+        else:
+            self.logger.info(
+                "• Query gene {}! {} hits genes: {}".format(
+                    colour("OK", 'green'),
+                    colour(len(self.gene_hits), 'green'),
+                    [x['name'] for x in self.gene_hits]))
+
+    def query_trans(self):
+        try:
+            if self.ann_source == 'GENCODE':
+                self._query_trans_via_gencode()
+            elif self.ann_source == 'RefSeq':
+                self._query_trans_via_refseq()
+        except Exception as e:
+            self.logger.error(colour(
+                "[QUERY_TRANS] Error! {}:{}, {}".format(
+                    self.chr, self.pos, e), 'ERR'))
+        else:
+            self.logger.info(
+                "• Query transcripts {}! {} hits transcripts: {}".format(
+                    colour("OK", 'green'),
+                    colour(len(self.trans_hits), 'green'),
+                    [x['id'] for x in self.trans_hits]))
+
+    def set_rank_info(self):
+        try:
+            if self.ann_source == 'GENCODE':
+                self._set_rank_info_via_gencode()
+            elif self.ann_source == 'RefSeq':
+                self._set_rank_info_via_refseq()
+        except Exception as e:
+            self.logger.error(colour(
+                "[SET_RANK_INFO] Error! {}:{}, {}".format(
+                    self.chr, self.pos, e), 'ERR'))
+
+    def _query_gene_via_gencode(self):
         def gen_gene_type_regex():
             if self.ann_gene_type == 'protein_coding':
                 pc_regex = '|'.join(self.protein_coding_types)
@@ -494,7 +536,7 @@ class AnnCoordinates(object):
                 tab=self.ann_tab,
                 gene_type_regex=gene_type_regex)
 
-            c = self.m_con.query(sql, [self.chr, self.pos, self.pos])
+            c = self.mysql_con.query(sql, [self.chr, self.pos, self.pos])
             r = c.fetchall()
             return r
 
@@ -528,14 +570,14 @@ class AnnCoordinates(object):
                 tab=self.ann_tab,
                 gene_type_regex=gene_type_regex)
 
-            r_l = self.m_con.query(sql_l, [self.chr, self.pos]).fetchone()
+            r_l = self.mysql_con.query(sql_l, [self.chr, self.pos]).fetchone()
             sql_r = ("SELECT * FROM `{tab}` "
                      "WHERE SeqID = %s AND Feature = 'gene' AND "
                      "Start > %s{gene_type_regex} ORDER BY Start LIMIT 1")
             sql_r = sql_r.format(
                 tab=self.ann_tab,
                 gene_type_regex=gene_type_regex)
-            r_r = self.m_con.query(sql_r, [self.chr, self.pos]).fetchone()
+            r_r = self.mysql_con.query(sql_r, [self.chr, self.pos]).fetchone()
 
             gene_name_l = '-' if r_l is None else self._get_attr_value(r_l[9], 'gene_name')
             gene_name_r = '-' if r_r is None else self._get_attr_value(r_r[9], 'gene_name')
@@ -598,7 +640,7 @@ class AnnCoordinates(object):
             # Special case: intergenic IGH
             handle_intergenic_igh(self.gene_hits[0])
 
-    def _query_trans(self):
+    def _query_trans_via_gencode(self):
         def gen_r():
             sql = ("SELECT * FROM `{tab}` "
                    "WHERE SeqID = %s AND Feature IN "
@@ -609,7 +651,7 @@ class AnnCoordinates(object):
             r = []
             for gene in self.gene_hits:
                 if gene['id'] is not None:
-                    c = self.m_con.query(sql, [self.chr, r"%gene_id={}%".format(gene['id'])])
+                    c = self.mysql_con.query(sql, [self.chr, r"%gene_id={}%".format(gene['id'])])
                     r += c.fetchall()
             return r
 
@@ -677,7 +719,7 @@ class AnnCoordinates(object):
                     "[QUERY_TRANS] No trasncripts found for [{}]".format(
                         ', '.join([x['name'] for x in self.gene_hits])), 'ERR'))
 
-    def set_rank_info(self):
+    def _set_rank_info_via_gencode(self):
         def set_rank():
             def gen_rank(feature, exon_num, exon=True):
                 if feature == 'CDS':
@@ -804,6 +846,15 @@ class AnnCoordinates(object):
 
         set_rank()
         set_exon_and_cds()
+
+    def _query_gene_via_refseq(self):
+        pass
+
+    def _query_trans_via_refseq(self):
+        pass
+
+    def _set_rank_info_via_refseq(self):
+        pass
 
     def _get_attr_value(self, attr, key):
         s = re.search("{}=([^;]+);".format(key), attr)

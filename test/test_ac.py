@@ -33,7 +33,7 @@ class TestAnnCoordinates(unittest.TestCase):
     MYSQL_CON = None
 
     default_args = {
-        'config': None,
+        'mysql_config': None,
         'use_cache': True,
         'logger_level': 50,  # logging.CRITICAL
     }
@@ -72,7 +72,7 @@ class TestAnnCoordinates(unittest.TestCase):
             # Skip all test
             cls.skipTest(cls, "Invalid MySQL config: {}".format(e))
         else:
-            cls.default_args['config'] = mysql_config
+            cls.default_args['mysql_config'] = mysql_config
             cls.MYSQL_CON = mysql_con
 
     @classmethod
@@ -85,13 +85,13 @@ class TestAnnCoordinates(unittest.TestCase):
 
         # Connect with MYSQL config
         ac = AnnCoordinates(**args)
-        self.assertIsNotNone(ac.m_con)
+        self.assertIsNotNone(ac.mysql_con)
 
         # Connect with MYSQL connection
-        args['config'] = None
+        args['mysql_config'] = None
         args['mysql_con'] = self.MYSQL_CON
         ac = AnnCoordinates(**args)
-        self.assertIsNotNone(ac.m_con)
+        self.assertIsNotNone(ac.mysql_con)
 
     def _test_ann_alk_(self, args):
         """
