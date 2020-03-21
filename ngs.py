@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.16
+# VERSION : v0.0.17
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -43,6 +43,8 @@
 # 1. :AnnCoordinates: set rank to 'intragenic' if the coordinate out of transcript;
 # UPDATE  : [v0.0.16] March 19 2020
 # 1. :AnnCoordinates: adjust the framework to prepare to support a new source (RefSeq);
+# UPDATE  : [v0.0.17] March 21 2020
+# 1. :AnnCoordinates: add new source: RefSeq;
 
 import os
 import re
@@ -51,12 +53,13 @@ from copy import deepcopy as copy
 from collections import defaultdict
 
 import numpy as np
+import pandas as pd
 
 from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.16'
+__VERSION__ = 'v0.0.17'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -240,6 +243,7 @@ class AnnCoordinates(object):
                  ann_source='GENCODE',
                  ann_tab=None,
                  ann_gene_type='protein_coding',
+                 ann_refseq_files=None,  # GenePred table format
                  use_cache=True,
                  logger_name=None, logger_level=logging.INFO):
 
@@ -254,6 +258,8 @@ class AnnCoordinates(object):
         self.ann_source = ann_source
         self.ann_tab = ann_tab
         self.ann_gene_type = ann_gene_type
+        self.ann_refseq_files = ann_refseq_files
+        self.ann_refseq_df = None
         self.use_cache = use_cache
         self.logger_name = logger_name or self.__class__.__name__
         self.logger_level = logger_level
@@ -333,6 +339,10 @@ class AnnCoordinates(object):
                 self.connect_db()
             assert self.mysql_con is not None
 
+        # Set annotation RefSeq DataFrame (only used by RefSeq)
+        if self.ann_source == 'RefSeq':
+            self.ann_refseq_df = self.gen_refseq_df()
+
     def init_logger(self):
         logger = logging.getLogger(self.logger_name)
         if logger.parent.name == 'root':
@@ -375,6 +385,36 @@ class AnnCoordinates(object):
             self.mysql_con = MysqlConnector(
                 self.mysql_config,
                 verbose=self.logger_level < logging.INFO)
+
+    def gen_refseq_df(self):
+        def read_csv(path_file):
+            return pd.read_csv(path_file, header=0, sep='\t')
+
+        assert isinstance(self.ann_refseq_files, (str, list, set)), \
+            "Invalid RefSeq files type: {}, str or list or set expected!".format(
+                type(self.ann_refseq_files))
+
+        if isinstance(self.ann_refseq_files, str):
+            assert os.path.isfile(self.ann_refseq_files), \
+                "Invalid RefSeq file: {}".format(self.ann_refseq_files)
+            return read_csv(self.ann_refseq_files)
+
+        elif isinstance(self.ann_refseq_files, (list, set)):
+            ann_refseq_df = None
+            for ann_refseq_file in self.ann_refseq_files:
+                assert os.path.isfile(ann_refseq_file), \
+                    "Invalid RefSeq file: {}".format(ann_refseq_file)
+
+                ann_refseq_file = os.path.abspath(ann_refseq_file)
+                if ann_refseq_df is None:
+                    ann_refseq_df = read_csv(ann_refseq_file)
+                else:
+                    ann_refseq_df_new = read_csv(ann_refseq_file)
+                    assert list(ann_refseq_df.columns) == list(ann_refseq_df_new.columns), \
+                        "{} has a header that is inconsistent with the others".format(
+                            os.path.basename(ann_refseq_file))
+                    ann_refseq_df = pd.concat([ann_refseq_df, ann_refseq_df_new])
+            return ann_refseq_df
 
     def init_ann(self):
         self.chr_raw = None
@@ -477,24 +517,34 @@ class AnnCoordinates(object):
             if self.ann_source == 'GENCODE':
                 self._query_gene_via_gencode()
             elif self.ann_source == 'RefSeq':
-                self._query_gene_via_refseq()
+                self._query_gene_and_trans_via_refseq()
         except Exception as e:
             self.logger.error(colour(
                 "[QUERY_GENE] Error! {}:{}, {}".format(
                     self.chr, self.pos, e), 'ERR'))
         else:
-            self.logger.info(
-                "• Query gene {}! {} hits genes: {}".format(
-                    colour("OK", 'green'),
-                    colour(len(self.gene_hits), 'green'),
-                    [x['name'] for x in self.gene_hits]))
+            if self.ann_source == 'GENCODE':
+                self.logger.info(
+                    "• Query gene {}! {} hits genes: {}".format(
+                        colour("OK", 'green'),
+                        colour(len(self.gene_hits), 'green'),
+                        [x['name'] for x in self.gene_hits]))
+            elif self.ann_source == 'RefSeq':
+                self.logger.info(
+                    "• Query gene {}! {} hits genes: {}; {} hits transcripts: {}".format(
+                        colour("OK", 'green'),
+                        colour(len(self.gene_hits), 'green'),
+                        [x['name'] for x in self.gene_hits],
+                        colour(len(self.trans_hits), 'green'),
+                        [x['id'] for x in self.trans_hits]))
 
     def query_trans(self):
+        # No need for RefSeq
+        if self.ann_source == 'RefSeq':
+            return
+
         try:
-            if self.ann_source == 'GENCODE':
-                self._query_trans_via_gencode()
-            elif self.ann_source == 'RefSeq':
-                self._query_trans_via_refseq()
+            self._query_trans_via_gencode()
         except Exception as e:
             self.logger.error(colour(
                 "[QUERY_TRANS] Error! {}:{}, {}".format(
@@ -598,33 +648,6 @@ class AnnCoordinates(object):
             }]
             return gene_hits
 
-        def handle_intergenic_igh(gene_hit):
-            def extract_igh_from_intergenic(gene):
-                if 'intergenic' in gene:
-                    intergenic_gene_regex = \
-                        re.match(r'intergenic\(([^,]+), ?([^,]+)\)', gene)
-                    if intergenic_gene_regex:
-                        gene_a, gene_b = intergenic_gene_regex.groups()
-                        if re.match('IGH', gene_a) and re.match('IGH', gene_b):
-                            if re.match('IGH[VDJ]', gene_a):
-                                return gene_a, True
-                            elif re.match('IGH[VDJ]', gene_b):
-                                return gene_b, True
-                            else:
-                                return gene_a, True
-                return gene, False
-
-            gene = gene_hit['name']
-            gene_igh, is_igh = extract_igh_from_intergenic(gene)
-            if is_igh:
-                self.logger.warning(
-                    "[HANDLE_INTERGENIC_IGH] intergenic IGH: {} -> {}".format(
-                        gene, gene_igh))
-                gene_hit['name'] = gene_igh
-                gene_hit['type'] = 'intergenic_igh'
-                # Suppose all IGH* gene are minus strand(-)
-                gene_hit['strand'] = '-'
-
         gene_type_regex = gen_gene_type_regex()
         r = gen_r(gene_type_regex)
 
@@ -638,7 +661,7 @@ class AnnCoordinates(object):
             self.gene_hits = query_gene_intergenic(gene_type_regex)
             assert len(self.gene_hits) == 1
             # Special case: intergenic IGH
-            handle_intergenic_igh(self.gene_hits[0])
+            self._handle_intergenic_igh(self.gene_hits[0])
 
     def _query_trans_via_gencode(self):
         def gen_r():
@@ -707,7 +730,9 @@ class AnnCoordinates(object):
                     'strand': entry[7],
                     'attr': entry[9],
                 })
-            return list(trans_hits.values())
+
+            trans_hits = sorted(trans_hits.values(), key=lambda x: x['size'], reverse=True)
+            return trans_hits
 
         r = gen_r()
 
@@ -716,7 +741,7 @@ class AnnCoordinates(object):
         else:
             if len([x for x in self.gene_hits if x['id'] is not None]):
                 self.logger.error(colour(
-                    "[QUERY_TRANS] No trasncripts found for [{}]".format(
+                    "[QUERY_TRANS] No transcripts found for [{}]".format(
                         ', '.join([x['name'] for x in self.gene_hits])), 'ERR'))
 
     def _set_rank_info_via_gencode(self):
@@ -847,14 +872,289 @@ class AnnCoordinates(object):
         set_rank()
         set_exon_and_cds()
 
-    def _query_gene_via_refseq(self):
-        pass
+    def _query_gene_and_trans_via_refseq(self):
+        def get_breakpoint_hits(chrom, pos):
+            df_bp_hits = self.ann_refseq_df[
+                (self.ann_refseq_df['chrom'] == chrom) &
+                (self.ann_refseq_df['txStart'] <= pos) &
+                (self.ann_refseq_df['txEnd'] >= pos)]
+            return df_bp_hits
 
-    def _query_trans_via_refseq(self):
-        pass
+        def get_gene_hits(chrom, gene_name):
+            df_gene_hits = self.ann_refseq_df[
+                (self.ann_refseq_df['chrom'] == chrom) &
+                (self.ann_refseq_df['name2'] == gene_name)]
+            return df_gene_hits
+
+        def gen_gene_and_trans_hits(df_hits):
+            gene_hits_dict = {}
+            for idx, row in df_hits.iterrows():
+                gene_name = row['name2']
+                gene_type = 'protein_coding'  # set to 'protein_coding' as default
+                chrom = row['chrom']
+                strand = row['strand']
+
+                if gene_name not in gene_hits_dict:
+                    gene_hits_dict[gene_name] = {
+                        'id': gene_name,
+                        'name': gene_name,
+                        'type': gene_type,
+                        'source': 'RefSeq',
+                        'chr': chrom,
+                        'start': None,
+                        'end': None,
+                        'strand': strand,
+                        'transcripts': [],
+                    }
+
+            gene_hits = []
+            trans_hits = {}
+            for gene_name, item in sorted(gene_hits_dict.items(), key=lambda x: x[0]):
+                df_gene_hits = get_gene_hits(item['chr'], gene_name)
+                item['start'] = min(df_gene_hits['txStart'])
+                item['end'] = max(df_gene_hits['txEnd'])
+                item['transcripts'] = sorted(list(set(df_gene_hits['name'])))
+                gene_hits.append(item)
+
+                for idx, row in df_gene_hits.iterrows():
+                    transcript_id = row['name']
+                    gene_name = row['name2']
+                    tx_start = row['txStart']
+                    tx_end = row['txEnd']
+                    strand = row['strand']
+
+                    trans_hits[transcript_id] = {
+                        'id': transcript_id,
+                        'gene_id': gene_name,
+                        'start': tx_start,
+                        'end': tx_end,
+                        'size': tx_end - tx_start,
+                        'strand': strand,
+                        'exonStarts': row['exonStarts'],
+                        'exonEnds': row['exonEnds'],
+                        'rank_info': {
+                            'trans_id': transcript_id,
+                            'trans_start': tx_start,
+                            'trans_end': tx_end,
+                            'trans_strand': strand,
+                            'rank': None,
+                            'exon_num': 0,
+                            'exon_total': row['exonCount'],
+                            'cds_start': row['cdsStart'],
+                            'cds_end': row['cdsEnd'],
+                            'cds_min': 0,
+                            'cds_max': 0,
+                            'exon_start': 0,
+                            'exon_end': 0,
+                        },
+                    }
+
+            trans_hits = sorted(trans_hits.values(), key=lambda x: x['size'], reverse=True)
+            return gene_hits, trans_hits
+
+        def get_intergenic_hits(chrom, pos):
+            def get_gene_intergenic_name(hits):
+                if len(hits):
+                    hit = hits.iloc[0]
+                    gene_name = hit['name2']
+                    return gene_name
+                else:
+                    return '-'
+
+            def get_gene_intergenic_range(hits, key):
+                if len(hits):
+                    hit = hits.iloc[0]
+                    return hit[key]
+                else:
+                    return 0
+
+            hits_left = self.ann_refseq_df[
+                (self.ann_refseq_df['chrom'] == chrom) &
+                (self.ann_refseq_df['txEnd'] <= pos)].sort_values('txEnd', ascending=False)
+            hits_right = self.ann_refseq_df[
+                (self.ann_refseq_df['chrom'] == chrom) &
+                (self.ann_refseq_df['txStart'] >= pos)].sort_values('txStart', ascending=True)
+
+            gene_left = get_gene_intergenic_name(hits_left)
+            gene_right = get_gene_intergenic_name(hits_right)
+            gene_name = "intergenic({},{})".format(gene_left, gene_right)
+
+            start = get_gene_intergenic_range(hits_left, 'txEnd')  # left gene's end
+            end = get_gene_intergenic_range(hits_right, 'txStart')  # right gene's start
+
+            gene_hits = [{
+                'id': None,
+                'name': gene_name,
+                'type': 'intergenic',
+                'source': None,
+                'chr': self.chr,
+                'start': int(start),
+                'end': int(end),
+                'strand': None,
+                'transcripts': [],
+            }]
+            return gene_hits
+
+        assert self.ann_refseq_df is not None
+
+        df_bp_hits = get_breakpoint_hits(self.chr, self.pos)
+        if len(df_bp_hits):
+            self.gene_hits, self.trans_hits = gen_gene_and_trans_hits(df_bp_hits)
+        else:
+            self.logger.warning(colour(
+                "[QUERY_GENE] No gene found for {}:{}, "
+                "try to annotate as intergenic region".format(
+                    self.chr, self.pos), 'WRN'))
+            self.gene_hits = get_intergenic_hits(self.chr, self.pos)
+            assert len(self.gene_hits) == 1
+            # Special case: intergenic IGH
+            self._handle_intergenic_igh(self.gene_hits[0])
 
     def _set_rank_info_via_refseq(self):
-        pass
+        def format_exons(trans):
+            exonStarts = trans['exonStarts'].rstrip(',').split(',')
+            exonEnds = trans['exonEnds'].rstrip(',').split(',')
+            exons = zip(exonStarts, exonEnds)
+            exons = [(int(start), int(end)) for (start, end) in exons]
+
+            return exons
+
+        def get_exon_num(i, exons, strand):
+            if strand == '+':
+                return i + 1
+            elif strand == '-':
+                return len(exons) - i
+
+        def set_utr(rank_info, rank, pos):
+            if re.match('Exon', rank):
+                if pos < rank_info['cds_start']:
+                    if rank_info['trans_strand'] == '+':
+                        return "5'UTR"
+                    elif rank_info['trans_strand'] == '-':
+                        return "3'UTR"
+                elif pos > rank_info['cds_end']:
+                    if rank_info['trans_strand'] == '+':
+                        return "3'UTR"
+                    elif rank_info['trans_strand'] == '-':
+                        return "5'UTR"
+            return rank
+
+        for trans in self.trans_hits:
+            exons = format_exons(trans)
+            transcript_id = trans['id']
+            strand = trans['strand']
+            rank_info = trans['rank_info']
+
+            exon_num = 0
+            exon_start = 0
+            exon_end = 0
+
+            loc_flag = -1
+            for i, (start, end) in enumerate(exons):
+                exon_num_i = get_exon_num(i, exons, strand)
+                if start + 1 <= self.pos and self.pos <= end:
+                    exon_num = exon_num_i
+                    exon_start = start
+                    exon_end = end
+                    loc_flag = 0
+                    rank = "Exon{}".format(exon_num)
+                    break
+                else:
+                    if self.pos < start:
+                        if loc_flag == 1:
+                            if strand == '+':
+                                exon_num = exon_num_i - 1
+                            elif strand == '-':
+                                exon_num = exon_num_i
+                            exon_start = start
+                            loc_flag = 0
+                            rank = "Intron{}".format(exon_num)
+                            break
+                        else:
+                            loc_flag = -1
+                    elif end < self.pos:
+                        loc_flag = 1
+                        exon_end = end
+
+            if loc_flag != 0:
+                if trans['strand'] == '+':
+                    strand_flag = 1
+                elif trans['strand'] == '-':
+                    strand_flag = -1
+                else:
+                    strand_flag = 0
+
+                if strand_flag * loc_flag == 1:
+                    # rank = "3'UTR"
+                    rank = "intragenic"
+                    exon_num = -3
+                elif strand_flag * loc_flag == -1:
+                    # rank = "5'UTR"
+                    rank = "intragenic"
+                    exon_num = -5
+                else:
+                    rank = ''
+
+                if transcript_id == self.default_transcript:
+                    self.logger.warning(colour(
+                        "[SET_RANK] {}:{} seems {} than "
+                        "the range of transcript: {}({}) {}-{}, "
+                        "use {} instead".format(
+                            self.chr, self.pos,
+                            'LESS' if loc_flag == -1 else 'LARGE',
+                            transcript_id, trans['strand'],
+                            trans['start'], trans['end'],
+                            rank), 'WRN'))
+            else:
+                rank = set_utr(rank_info, rank, self.pos)
+
+            # Set cds_min & cds_max
+            for i, (start, end) in enumerate(exons):
+                exon_num_i = get_exon_num(i, exons, strand)
+                if start <= rank_info['cds_start'] and \
+                   rank_info['cds_start'] <= end:
+                    if strand == '+':
+                        rank_info['cds_min'] = exon_num_i
+                    elif strand == '-':
+                        rank_info['cds_max'] = exon_num_i
+                if start <= rank_info['cds_end'] and \
+                   rank_info['cds_end'] <= end:
+                    if strand == '+':
+                        rank_info['cds_max'] = exon_num_i
+                    elif strand == '-':
+                        rank_info['cds_min'] = exon_num_i
+
+            rank_info['rank'] = rank
+            rank_info['exon_num'] = exon_num
+            rank_info['exon_start'] = exon_start
+            rank_info['exon_end'] = exon_end
+
+    def _handle_intergenic_igh(self, gene_hit):
+        def extract_igh_from_intergenic(gene):
+            if 'intergenic' in gene:
+                intergenic_gene_regex = \
+                    re.match(r'intergenic\(([^,]+), ?([^,]+)\)', gene)
+                if intergenic_gene_regex:
+                    gene_a, gene_b = intergenic_gene_regex.groups()
+                    if re.match('IGH', gene_a) and re.match('IGH', gene_b):
+                        if re.match('IGH[VDJ]', gene_a):
+                            return gene_a, True
+                        elif re.match('IGH[VDJ]', gene_b):
+                            return gene_b, True
+                        else:
+                            return gene_a, True
+            return gene, False
+
+        gene = gene_hit['name']
+        gene_igh, is_igh = extract_igh_from_intergenic(gene)
+        if is_igh:
+            self.logger.warning(
+                "[HANDLE_INTERGENIC_IGH] intergenic IGH: {} -> {}".format(
+                    gene, gene_igh))
+            gene_hit['name'] = gene_igh
+            gene_hit['type'] = 'intergenic_igh'
+            # Suppose all IGH* gene are minus strand(-)
+            gene_hit['strand'] = '-'
 
     def _get_attr_value(self, attr, key):
         s = re.search("{}=([^;]+);".format(key), attr)
@@ -955,10 +1255,10 @@ class AnnCoordinates(object):
            2. Prefer longest transcript
         """
 
+        default_transcript = None
+
         # Policy 0
         trans_hits = [x for x in self.trans_hits if x['id'] in self.gene_info['transcripts']]
-
-        default_transcript = None
 
         # Policy 1
         trans_hits_sorted = sorted(trans_hits, key=lambda x: x['size'], reverse=True)
@@ -987,10 +1287,10 @@ class AnnCoordinates(object):
            2. Prefer first transcript
         """
 
+        rank_info = None
+
         # Policy 0
         trans_hits = [x for x in self.trans_hits if x['id'] in self.gene_info['transcripts']]
-
-        rank_info = None
 
         # Policy 1
         for x in trans_hits:
@@ -1007,7 +1307,7 @@ class AnnCoordinates(object):
             rank_info = {}
 
         # Special case: intergenic IGH
-        if self.gene_info['type'] == 'intergenic_igh':
+        if self.gene_info.get('type', '') == 'intergenic_igh':
             rank_info['trans_strand'] = '-'
 
         return rank_info
