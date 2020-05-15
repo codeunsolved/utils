@@ -288,6 +288,8 @@ class TestAnnCoordinates_GENCODE(unittest.TestCase):
         self.assertEqual(gene_hit['type'], 'intergenic')
         self.assertIsNone(gene_hit['source'])
         self.assertIsNone(gene_hit['strand'])
+        self.assertEqual(gene_hit['intergenic_nearest']['name'], 'KRT12')
+        self.assertEqual(gene_hit['intergenic_nearest']['distance'], -4148)
 
     def test_05_ann_intergenic_igh_gene(self):
         args = deepcopy(self.default_args)
@@ -365,6 +367,8 @@ class TestAnnCoordinates_GENCODE(unittest.TestCase):
         self.assertEqual(gene_info['end'], 38814)
         self.assertIsNone(gene_info['source'])
         self.assertIsNone(gene_info['strand'])
+        self.assertEqual(gene_info['intergenic_nearest']['name'], 'FAM110C')
+        self.assertEqual(gene_info['intergenic_nearest']['distance'], -38714)
 
         # intergenic at right most side
         ac = AnnCoordinates(**args)
@@ -377,6 +381,8 @@ class TestAnnCoordinates_GENCODE(unittest.TestCase):
         self.assertEqual(gene_info['end'], 0)
         self.assertIsNone(gene_info['source'])
         self.assertIsNone(gene_info['strand'])
+        self.assertEqual(gene_info['intergenic_nearest']['name'], 'AC131097.4')
+        self.assertEqual(gene_info['intergenic_nearest']['distance'], 354571)
 
 
 class TestAnnCoordinates_REFSEQ(unittest.TestCase):
@@ -614,6 +620,8 @@ class TestAnnCoordinates_REFSEQ(unittest.TestCase):
         self.assertEqual(gene_hit['type'], 'intergenic')
         self.assertIsNone(gene_hit['source'])
         self.assertIsNone(gene_hit['strand'])
+        self.assertEqual(gene_hit['intergenic_nearest']['name'], 'KRT12')
+        self.assertEqual(gene_hit['intergenic_nearest']['distance'], -4147)
 
     def test_05_ann_intergenic_igh_gene(self):
         args = deepcopy(self.default_args)
@@ -640,6 +648,8 @@ class TestAnnCoordinates_REFSEQ(unittest.TestCase):
         self.assertEqual(gene_hit['type'], 'intergenic_igh')
         self.assertIsNone(gene_hit['source'])
         self.assertEqual(gene_hit['strand'], '-')
+        self.assertEqual(gene_hit['intergenic_nearest']['name'], 'IGHJ6')
+        self.assertEqual(gene_hit['intergenic_nearest']['distance'], 30)
         rank_info = ac.rank_info
         self.assertEqual(rank_info['trans_strand'], '-')
 
@@ -703,6 +713,8 @@ class TestAnnCoordinates_REFSEQ(unittest.TestCase):
         self.assertEqual(gene_info['end'], 38813)
         self.assertIsNone(gene_info['source'])
         self.assertIsNone(gene_info['strand'])
+        self.assertEqual(gene_info['intergenic_nearest']['name'], 'FAM110C')
+        self.assertEqual(gene_info['intergenic_nearest']['distance'], -38713)
 
         # intergenic at right most side
         ac = AnnCoordinates(**args)
@@ -715,3 +727,5 @@ class TestAnnCoordinates_REFSEQ(unittest.TestCase):
         self.assertEqual(gene_info['end'], 0)
         self.assertIsNone(gene_info['source'])
         self.assertIsNone(gene_info['strand'])
+        self.assertEqual(gene_info['intergenic_nearest']['name'], 'LINC01881')
+        self.assertEqual(gene_info['intergenic_nearest']['distance'], 22614)
