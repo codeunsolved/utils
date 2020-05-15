@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.17
+# VERSION : v0.0.18
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -45,6 +45,8 @@
 # 1. :AnnCoordinates: adjust the framework to prepare to support a new source (RefSeq);
 # UPDATE  : [v0.0.17] March 21 2020
 # 1. :AnnCoordinates: add new source: RefSeq;
+# UPDATE  : [v0.0.18] May 15 2020
+# 1. :AnnCoordinates: gene_hits add 'intergenic_nearest';
 
 import os
 import re
@@ -59,7 +61,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.17'
+__VERSION__ = 'v0.0.18'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -275,11 +277,13 @@ class AnnCoordinates(object):
         # 'id': Ensembl gene ID
         # 'name': GENCODE gene name
         # 'type': GENCODE gene type
-        # 'chr': chromosome
         # 'source': entry source
+        # 'chr': chromosome
         # 'start': {N}
         # 'end': {N}
         # 'strand': +/-/None
+        # 'intergenic_nearest': nearest gene in intergenic region
+        #   {'name': nearest gene name, 'distance': pos - nearest gene border}
         self.gene_hits = []
         self.gene_info = {}  # Choosen one in self.gene_hits
         # Transcript hits contains {key: val}:
@@ -635,6 +639,9 @@ class AnnCoordinates(object):
             end = 0 if r_r is None else r_r[4]    # Right gene's start
             name = "intergenic({},{})".format(gene_name_l, gene_name_r)
 
+            nearest_gene, nearest_dist = self._choose_intergenic_nearest(
+                self.pos, start, end, gene_name_l, gene_name_r)
+
             gene_hits = [{
                 'id': None,
                 'name': name,
@@ -645,6 +652,10 @@ class AnnCoordinates(object):
                 'end': int(end),
                 'strand': None,
                 'transcripts': [],
+                'intergenic_nearest': {
+                    'name': nearest_gene,
+                    'distance': nearest_dist,
+                },
             }]
             return gene_hits
 
@@ -982,6 +993,9 @@ class AnnCoordinates(object):
             start = get_gene_intergenic_range(hits_left, 'txEnd')  # left gene's end
             end = get_gene_intergenic_range(hits_right, 'txStart')  # right gene's start
 
+            nearest_gene, nearest_dist = self._choose_intergenic_nearest(
+                pos, start, end, gene_left, gene_right)
+
             gene_hits = [{
                 'id': None,
                 'name': gene_name,
@@ -992,6 +1006,10 @@ class AnnCoordinates(object):
                 'end': int(end),
                 'strand': None,
                 'transcripts': [],
+                'intergenic_nearest': {
+                    'name': nearest_gene,
+                    'distance': nearest_dist,
+                },
             }]
             return gene_hits
 
@@ -1128,6 +1146,18 @@ class AnnCoordinates(object):
             rank_info['exon_num'] = exon_num
             rank_info['exon_start'] = exon_start
             rank_info['exon_end'] = exon_end
+
+    def _choose_intergenic_nearest(self, pos, left_end, right_start, gene_left, gene_right):
+        # If only ONE valid gene in intergenic region
+        if gene_left == '-':
+            return gene_right, pos - right_start
+        elif gene_right == '-':
+            return gene_left, pos - left_end
+
+        if abs(pos - left_end) <= abs(pos - right_start):
+            return gene_left, pos - left_end
+        else:
+            return gene_right, pos - right_start
 
     def _handle_intergenic_igh(self, gene_hit):
         def extract_igh_from_intergenic(gene):
