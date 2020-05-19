@@ -1349,3 +1349,9 @@ class AnnCoordinates(object):
     def get_rank_info(self):
         assert isinstance(self.rank_info, dict)
         return self.rank_info
+
+    def get_intergenic_nearest_gene(self, default=None):
+        assert isinstance(self.gene_info, dict)
+        intergenic_nearest = self.gene_info.get('intergenic_nearest', {})
+        gene = intergenic_nearest.get('name', default)
+        return gene
