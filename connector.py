@@ -3,7 +3,7 @@
 # PROGRAM : connector
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : June 14 2017
-# VERSION : v0.0.11
+# VERSION : v0.0.12
 # UPDATE  : [v0.0.1] March 21 2018
 # 1. add :PostgresqlConnector: with `get()` and exceptions like Djanngo;
 # 2. optimize :MysqlConnector: as :PostgresqlConnector:;
@@ -12,7 +12,7 @@
 # 2. add user-defined logger to :MysqlConnector: and :PostgresqlConnector:;
 # 3. optimize error code/number for :MysqlConnector: and :PostgresqlConnector:;
 # UPDATE  : [v0.0.3] November 29 2018
-# 1. use conditional import;
+# 1. use conditional import (not real);
 # 2. change line endings to Unix for minimum requirements;
 # UPDATE  : [v0.0.4] December 4 2018
 # 1. add :MongoConnector:;
@@ -31,10 +31,16 @@
 # 1. add mysql.connector.errors.DatabaseError to :MysqlConnector:‘s retry mechanism;
 # UPDATE  : [v0.0.11] January 2 2020
 # 1. add `commit()` to :MysqlConnector:‘s retry mechanism to handle 2013 error;
+# UPDATE  : [v0.0.12] July 28 2020
+# 1. real conditional import: move `__import__` to `__init__()`;
 
 import time
 import logging
 from collections import defaultdict
+
+# import mysql.connector  # used by MysqlConnector
+# import psycopg2         # used by PostgresqlConnector
+# import pymongo          # used by MongoConnector
 
 
 class DoesNotExist(Exception):
@@ -60,7 +66,6 @@ def stats_performance(func):
 
 
 class MysqlConnector(object):
-    mysql = __import__('mysql.connector')
     """Connect MySQL and execute SQL on it.
 
     :param config: config for new class.
@@ -75,6 +80,8 @@ class MysqlConnector(object):
     """
 
     def __init__(self, config, dictionary=False, retry_n=7, retry_sleep=0.5, verbose=False):
+        self.mysql = __import__('mysql.connector')
+
         self.config = config
         self.dictionary = dictionary
 
@@ -273,7 +280,6 @@ class MysqlConnector(object):
 
 
 class PostgresqlConnector(object):
-    psycopg2 = __import__('psycopg2')
     """Connect PostgreSQL and execute SQL on it.
 
     :param config: config for new class.
@@ -287,6 +293,8 @@ class PostgresqlConnector(object):
     """
 
     def __init__(self, config, verbose=False):
+        self.psycopg2 = __import__('psycopg2')
+
         self.config = config
 
         # Debug
@@ -380,7 +388,6 @@ class PostgresqlConnector(object):
 
 
 class MongoConnector(object):
-    pymongo = __import__('pymongo')
     """Connect MongoDB and execute operations on it.
 
     :param config: config for new class.
@@ -394,6 +401,8 @@ class MongoConnector(object):
     """
 
     def __init__(self, config, verbose=False):
+        self.pymongo = __import__('pymongo')
+
         self.config = config
 
         # Debug
