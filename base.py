@@ -3,7 +3,7 @@
 # PROGRAM : base
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : August 10 2016
-# VERSION : v0.0.5
+# VERSION : v0.0.6
 # UPDATE  : [v0.0.1] February 13 2017
 # 1. add `color_term()`, `execute_cmd()` and log related function/class;
 # 2. add :FileHandlerFormatter: to remove ANSI color format when :SetupLogger: log to `FileHandler`;
@@ -19,12 +19,17 @@
 # 1. complete log levels in `colour` and make it consistent with :SetupLogger:;
 # UPDATE  : [v0.0.5] May 22 2019
 # 1. optimize log directory generation in :SetupLogger: to support multiple thread workflow;
+# UPDATE  : [v0.0.6] July 28 2020
+# 1. add `gen_timestamp()`, `get_file_size()`, `gen_hash()`;
 
 import os
 import re
 import sys
+import time
 import shlex
+import hashlib
 import logging
+import datetime
 import subprocess
 
 
@@ -67,6 +72,41 @@ def color_term(string, color='blue', bold=True,
         exit(exit_code)
 
     return color_string
+
+
+def gen_timestamp(fmt='isodate'):
+    assert fmt in ['int', 'str', 'isodate']
+    if fmt == 'int':
+        date = time.time()
+    elif fmt == 'str':
+        date = time.strftime("%Y-%m-%d %H:%M:%S")
+    elif fmt == 'isodate':
+        date = datetime.datetime.utcnow()
+    return date
+
+
+def get_file_size(path_file, unit='MB'):
+    assert unit in ['B', 'KB', 'MB', 'GB']
+
+    E = {
+        'B': 0,
+        'KB': 1,
+        'MB': 2,
+        'GB': 3,
+    }
+
+    size = os.path.getsize(path_file)
+
+    size = size / (1024 ** E[unit])
+    size = round(size, 3)
+
+    return size
+
+
+def gen_hash(text):
+    m = hashlib.sha256()
+    m.update(text.encode())
+    return m.hexdigest()
 
 
 def execute_cmd(cmd):
