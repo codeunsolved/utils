@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.18
+# VERSION : v0.0.19
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -47,6 +47,8 @@
 # 1. :AnnCoordinates: add new source: RefSeq;
 # UPDATE  : [v0.0.18] May 15 2020
 # 1. :AnnCoordinates: gene_hits add 'intergenic_nearest';
+# UPDATE  : [v0.0.19] January 27 2021
+# 1. [BugFix] Fix the bug that gene_map is not used in some cases;
 
 import os
 import re
@@ -61,7 +63,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.18'
+__VERSION__ = 'v0.0.19'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -1229,38 +1231,38 @@ class AnnCoordinates(object):
             else:
                 return gene_len
 
-        if len(self.gene_hits) == 0:
-            return {}
-        elif len(self.gene_hits) == 1:
-            return self.gene_hits[0]
-
         gene_info = None
 
-        # Policy 1
-        for x in self.gene_hits:
-            for trans_id in x['transcripts']:
-                trans_id_main = re.sub(r'\.\d+$', '', trans_id)
-                if trans_id_main in self.transcript_map:
-                    gene_info = copy(x)
-                    self.logger.warning(colour(
-                        "[CHOOSE_GENE] Use {}({}) due to {} in 'transcript_map'".format(
-                            gene_info['id'], gene_info['name'], trans_id_main), 'WRN'))
-                    break
-            if gene_info is not None:
-                break
-
-        # Policy 2
-        if gene_info is None:
-            gene_hits_sorted = sorted(self.gene_hits, key=sort_gene_hits, reverse=True)
-            gene_info = copy(gene_hits_sorted[0])
-
-            self.logger.warning(colour(
-                "[CHOOSE_GENE] Use largest (protein coding) gene "
-                "as default: {}({}) {}".format(
-                    gene_info['id'], gene_info['name'], gene_info['type']), 'WRN'))
-
-        if gene_info is None:
+        if len(self.gene_hits) == 0:
             gene_info = {}
+        elif len(self.gene_hits) == 1:
+            gene_info = self.gene_hits[0]
+        else:
+            # Policy 1
+            for x in self.gene_hits:
+                for trans_id in x['transcripts']:
+                    trans_id_main = re.sub(r'\.\d+$', '', trans_id)
+                    if trans_id_main in self.transcript_map:
+                        gene_info = copy(x)
+                        self.logger.warning(colour(
+                            "[CHOOSE_GENE] Use {}({}) due to {} in 'transcript_map'".format(
+                                gene_info['id'], gene_info['name'], trans_id_main), 'WRN'))
+                        break
+                if gene_info is not None:
+                    break
+
+            # Policy 2
+            if gene_info is None:
+                gene_hits_sorted = sorted(self.gene_hits, key=sort_gene_hits, reverse=True)
+                gene_info = copy(gene_hits_sorted[0])
+
+                self.logger.warning(colour(
+                    "[CHOOSE_GENE] Use largest (protein coding) gene "
+                    "as default: {}({}) {}".format(
+                        gene_info['id'], gene_info['name'], gene_info['type']), 'WRN'))
+
+            if gene_info is None:
+                gene_info = {}
 
         # Map gene name
         if gene_info.get('name', None) in self.gene_map:
