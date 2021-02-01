@@ -3,7 +3,7 @@
 # PROGRAM : ngs
 # AUTHOR  : codeunsolved@gmail.com
 # CREATED : March 10 2018
-# VERSION : v0.0.19
+# VERSION : v0.0.20
 # UPDATE  : [v0.0.1] May 16 2018
 # 1. add `sequence_complement()`;
 # 2. add :AnnCoordinates:;
@@ -49,6 +49,9 @@
 # 1. :AnnCoordinates: gene_hits add 'intergenic_nearest';
 # UPDATE  : [v0.0.19] January 27 2021
 # 1. [BugFix] Fix the bug that gene_map is not used in some cases;
+# UPDATE  : [v0.0.20] February 1 2021
+# 1. [Bugfix] Fix the bug that does not consider that
+#    the position is exactly at the start of the exon;
 
 import os
 import re
@@ -63,7 +66,7 @@ from .base import colour
 from .base import color_term
 from .connector import MysqlConnector
 
-__VERSION__ = 'v0.0.19'
+__VERSION__ = 'v0.0.20'
 
 
 def sequence_complement(sequence, reverse=True):
@@ -1080,7 +1083,7 @@ class AnnCoordinates(object):
                     rank = "Exon{}".format(exon_num)
                     break
                 else:
-                    if self.pos < start:
+                    if self.pos <= start:
                         if loc_flag == 1:
                             if strand == '+':
                                 exon_num = exon_num_i - 1
